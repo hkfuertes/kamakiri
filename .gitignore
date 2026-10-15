@@ -4,3 +4,6 @@ __pycache__
 amonet.log
 modules/__pycache__
 modules/amonet.log
+bin/
+dist/
+build/
