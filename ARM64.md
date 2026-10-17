@@ -1,7 +1,8 @@
 # Sheldon: kernel ARM64 con Kamakiri (experimental)
 
 Esta rama selecciona la ruta ARM64 que ya existe en LK. Los payloads de
-Kamakiri siguen siendo ARM32. No hay todavía un arranque mainline validado.
+Kamakiri siguen siendo ARM32. Se ha observado OpenWrt AArch64 arrancando
+con `maxcpus=1`; esto no valida todavía SMP ni todos los periféricos.
 
 ## Activación por imagen
 
@@ -38,6 +39,53 @@ El inicializador en `0x41e0eec4` obtiene esa dirección mediante la entrada en
 fijos de este árbol: `get_device=0x41e23229`, `cache_clean=0x41e2353c` y
 reentrada `0x41e2585d`. No sustituir este LK por el de una OTA reciente.
 
+## ZIP de actualización del payload: BootROM o TWRP
+
+Requiere **Kamakiri ya instalado** y el LK fijado arriba; no es un instalador
+desde stock. TWRP solo es necesario para el método desde recovery. No necesita
+una imagen de kernel ni archivos TZ/preloader para actualizar el selector:
+
+```sh
+bash makedist-arm64.sh
+```
+
+Genera `dist/kamakiri-arm64-payload.zip`, utilizable de dos formas alternativas:
+flashear el ZIP en TWRP, o descomprimirlo y ejecutar en Linux:
+
+```sh
+unzip dist/kamakiri-arm64-payload.zip -d dist/boot0-update
+(cd dist/boot0-update && sudo ./boot0-bootrom-flash.sh --crash)
+```
+
+`--crash` intenta la transición preloader → BootROM original de Kamakiri, solo
+en RAM, y comprueba de nuevo BROM antes de cargar SRAM o escribir eMMC. Sin el
+flag se sigue rechazando preloader. Iniciar antes de conectar el stick.
+Ambos métodos verifican LK y solo escriben boot0 en LBA 4096 y después 1024,
+verificando cada lectura. No cambian preloader,
+LK, TZ, RPMB, GPT, boot ni recovery; no ejecutar el instalador completo
+`bootrom-step.sh`/`fixgpt` como sustituto.
+
+BootROM guarda las regiones originales modificadas en `bin/boot0-before-brom-*/`
+del paquete descomprimido. TWRP guarda boot0 completo en
+`/tmp/kamakiri-boot0-backup.*/boot0.bin` y restaura `force_ro` también si falla;
+extraer la copia con ADB antes de reiniciar para conservarla. El hash de LK se
+calcula sobre sus 318880 bytes, sin incluir el relleno del último sector.
+
+El payload sigue siendo ARM32. Una imagen ARM64 debe cumplir el formato y
+`bootopt` descritos en este documento; el ZIP no incluye una ROM ni U-Boot.
+
+Se mantiene el modo anterior, opcional, que también actualiza `boot`:
+
+```sh
+bash makedist-arm64.sh boot-arm64-kamakiri.img
+```
+
+Genera `dist/kamakiri-arm64-update.zip`; verifica tamaño/hash de la imagen,
+rechaza `boot` montado y guarda también la imagen anterior antes de escribir.
+Los instaladores se comprueban con `test_arm64.py`, `test_boot0.py` y
+`test_brom_connect.py` usando archivos/dispositivos simulados; no sustituye
+probar los ZIP en hardware real.
+
 ## Imagen necesaria (cuando se compile el kernel)
 
 - Kernel **AArch64 `Image.gz` con un DTB mainline de Sheldon añadido**. No sirve
@@ -73,38 +121,5 @@ make -C lk-payload test
 ```
 
 Solo compila y ejecuta en el host el selector de cabecera. No ejecuta firmware
-ni accede al dispositivo. La transición SMC, PSCI/SMP, DTB, periféricos y el
-arranque de Linux/OpenWrt siguen pendientes de prueba en hardware.
-
-## GPT
-
-Esta rama no modifica el GPT. Orden acordado:
-
-1. **ARM64 as-is.** Probar con el particionado y el firmware de arranque
-   actuales. Solo cambian el payload y la imagen de arranque; se conservan
-   nombres y tamaños.
-2. **Reclamar espacio sin tocar `vendor`.** Tras validar el arranque, preparar
-   `rootfs` de **256 MiB** y aprovechar para `rootfs_data` todo el espacio
-   posible al eliminar `recovery` Android y `cache` y reducir `system`.
-   `vendor` conserva nombre, posición, tamaño y contenido. Se aceptan huecos
-   sin asignar o un layout irregular; no se toca `vendor` para eliminarlos.
-3. **Eliminar `vendor` al validar el firmware mainline.** Solo cuando se haya
-   comprobado que el firmware disponible para mainline es suficiente para
-   el hardware que se vaya a utilizar, y se hayan preservado los blobs/datos
-   necesarios, eliminar `vendor` y reajustar el layout para aprovechar su espacio.
-
-La `vendor` de la OTA contiene HAL/bibliotecas Android, módulos del kernel
-Android y firmware, entre otros `WIFI_RAM_CODE_MT7663.bin`,
-`mt7663_patch_e2_hdr.bin` y `EEPROM_MT7663.bin`. Los módulos Android no sirven
-para mainline; los blobs/datos que requieran sus drivers pueden empaquetarse en
-el rootfs. `vendor` permanece intacta durante los pasos 1 y 2; su eliminación
-queda aplazada al paso 3.
-
-Antes de aplicar el segundo paso hay que adaptar las dependencias actuales:
-`lk`, `boot`, `recovery` y `MISC` se buscan por nombre entre las primeras 16
-entradas GPT, de 128 bytes desde LBA 2; el instalador también exige `tee1`.
-Eliminar `recovery` requiere cambiar el arranque, los flags de MISC y los
-instaladores. También se adaptarán el montaje del overlay y sysupgrade de OpenWrt.
-
-Volver a Android requerirá restaurar el GPT y las imágenes Android, además de
-Kamakiri: reinstalar Kamakiri por sí solo no reconstruye los datos eliminados.
+ni accede al dispositivo. El arranque OpenWrt AArch64 se ha comprobado por
+SSH en el dispositivo; esta prueba de host no valida PSCI/SMP ni periféricos.

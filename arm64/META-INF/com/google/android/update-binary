@@ -1,122 +1,110 @@
-#!/sbin/sh -x
-# kamakiri ARM64 updater
-# Based on kamakiri updater (C) 2019 k4y0z @ xda-developers
-# Updates ONLY: lk-payload (boot0) + injected ARM64 boot image.
-# Assumes original kamakiri is already installed (downgraded lk/tz, rpmb zeroed).
+#!/sbin/sh
+# Update an existing Kamakiri installation; never install preloader/LK/TZ/RPMB/GPT.
+set -eu
+OUTFD=$2
+ZIP=$3
+BOOT0=/dev/block/mmcblk0boot0
+LK=/dev/block/mmcblk0p1
+BOOT=/dev/block/mmcblk0p4
+SYS=/sys/class/block
+RO=$SYS/mmcblk0boot0/force_ro
+LK_SIZE=__LK_SIZE__
+LK_SHA=__LK_SHA256__
+PAYLOAD_SIZE=__PAYLOAD_SIZE__
+PAYLOAD_SHA=__PAYLOAD_SHA256__
+FLASH_BOOT=__FLASH_BOOT__
+BOOT_SIZE=__BOOT_SIZE__
+BOOT_SHA=__BOOT_SHA256__
+RESTORE_RO=
 
-PAYLOAD_BLOCK=1024
-PAYLOAD_BACKUP_BLOCK=4096
-BOOT_PART=boot            # boot | recovery (selector works for both)
+ui_print() { printf 'ui_print %s\nui_print\n' "$*" > "/proc/self/fd/$OUTFD"; }
+abort() { ui_print "! $*"; exit 1; }
+file_sha256() { sha256sum "$1" | awk '{print $1}'; }
 
-LK_SHA256=__LK_SHA256__   # filled by makedist-arm64.sh from bin/lk.bin
-LK_BLOCKS=__LK_BLOCKS__
-
-PART_PREFIX=/dev/block/platform/soc/11230000.mmc
-
-# detect whether in boot mode
-getprop | grep zygote | grep -q running && bootMode=true || bootMode=false
-
-# Default permissions
-umask 022
-
-ui_print() {
-  $bootMode && echo -e "$1" || echo -e "ui_print $1\nui_print" >> /proc/self/fd/$outFD
-}
-
-if $bootMode; then
-  ui_print " "
-  ui_print "(!) Boot mode install is not supported"
-  ui_print "- Install from recovery mode"
-  ui_print " "
-  exit 1
-fi
-
-grep_prop() {
-  REGEX="s/^$1=//p"
-  shift
-  FILES=$@
-  [ -z "$FILES" ] && FILES='/default.prop'
-  sed -n "$REGEX" $FILES 2>/dev/null | head -n 1
-}
-
-check_product() {
-  product=$(grep_prop ro.product.device)
-
-  if [ "$product" != "${1}" ] ; then
-    ui_print "This is only for the \"${1}\"${2}, your device is a \"${product}\""
-    exit 1
-  fi
-}
-
-setenforce 0
-
-outFD=$2
-ZIP="$3"
-
-readlink /proc/$$/fd/$outFD 2>/dev/null | grep /tmp >/dev/null
-if [ "$?" -eq "0" ]; then
-  outFD=0
-
-  for FD in `ls /proc/$$/fd`; do
-  readlink /proc/$$/fd/$FD 2>/dev/null | grep pipe >/dev/null
-  if [ "$?" -eq "0" ]; then
-    ps | grep " 3 $FD " | grep -v grep >/dev/null
-    if [ "$?" -eq "0" ]; then
-    outFD=$FD
-    break
+[ -n "$(getprop ro.twrp.version)" ] || abort "Install from TWRP, not Android/OpenWrt."
+case "$(getprop ro.product.device)" in sheldon|sheldonp) ;; *) abort "Sheldon only." ;; esac
+for tool in sha256sum head unzip toybox; do
+    command -v "$tool" >/dev/null 2>&1 || abort "$tool is required."
+done
+[ -b "$BOOT0" ] && [ -b "$LK" ] || abort "Cannot find boot0/LK devices."
+read -r sector_size < "$SYS/mmcblk0/queue/logical_block_size"
+read -r boot0_sectors < "$SYS/mmcblk0boot0/size"
+[ "$sector_size" = 512 ] && [ "$boot0_sectors" = 8192 ] || abort "Unexpected boot0 geometry."
+read -r old_ro < "$RO"
+case "$old_ro" in 0|1) ;; *) abort "Cannot identify force_ro setting." ;; esac
+TMP=$(mktemp -d /tmp/kamakiri-arm64.XXXXXX) || abort "Cannot create temporary directory."
+cleanup() {
+    result=$?
+    if [ -n "$RESTORE_RO" ]; then
+        if ! printf '%s\n' "$RESTORE_RO" > "$RO"; then
+            ui_print "! Could not restore boot0 force_ro."
+            result=1
+        fi
     fi
-  fi
-  done
+    rm -rf "$TMP"
+    exit "$result"
+}
+trap cleanup 0
+trap 'exit 1' HUP INT TERM
+unzip -o "$ZIP" arm64/payload.bin -d "$TMP" >/dev/null || abort "Cannot extract payload."
+[ "$PAYLOAD_SIZE" -gt 0 ] && [ "$PAYLOAD_SIZE" -le 524288 ] && [ "$((PAYLOAD_SIZE % 512))" -eq 0 ] \
+    || abort "Invalid payload size."
+[ "$(wc -c < "$TMP/arm64/payload.bin")" -eq "$PAYLOAD_SIZE" ] || abort "Payload size mismatch."
+[ "$(file_sha256 "$TMP/arm64/payload.bin")" = "$PAYLOAD_SHA" ] || abort "Payload hash mismatch."
+
+# Hash exactly LK_SIZE bytes: sector padding is not part of bin/lk.bin.
+LK_BLOCKS=$(((LK_SIZE + 511) / 512))
+toybox dd if="$LK" of="$TMP/lk-sectors.bin" bs=512 count="$LK_BLOCKS" 2>/dev/null || abort "Cannot read LK."
+head -c "$LK_SIZE" "$TMP/lk-sectors.bin" > "$TMP/lk.bin" || abort "Cannot trim LK read."
+[ "$(wc -c < "$TMP/lk.bin")" -eq "$LK_SIZE" ] && [ "$(file_sha256 "$TMP/lk.bin")" = "$LK_SHA" ] \
+    || abort "LK mismatch; this payload is pinned to Kamakiri's verified LK. No writes performed."
+
+if [ "$FLASH_BOOT" = 1 ]; then
+    [ -b "$BOOT" ] || abort "Boot partition not found."
+    read -r boot_blocks < "$SYS/mmcblk0p4/size"
+    [ "$BOOT_SIZE" -gt 0 ] && [ "$BOOT_SIZE" -le "$((boot_blocks * 512))" ] || abort "Boot image does not fit."
+    unzip -o "$ZIP" arm64/boot-arm64-kamakiri.img -d "$TMP" >/dev/null || abort "Cannot extract boot image."
+    [ "$(wc -c < "$TMP/arm64/boot-arm64-kamakiri.img")" -eq "$BOOT_SIZE" ] \
+        && [ "$(file_sha256 "$TMP/arm64/boot-arm64-kamakiri.img")" = "$BOOT_SHA" ] || abort "Boot image hash/size mismatch."
+    read -r devnum < "$SYS/mmcblk0p4/dev"
+    mounted=$(awk -v n="$devnum" '$3 == n || $5 ~ /^\/boot(\/|$)/ { print $5; exit }' /proc/self/mountinfo) \
+        || abort "Cannot inspect boot mounts."
+    [ -z "$mounted" ] || abort "Unmount Boot first."
 fi
 
-check_product "sheldon" " - Amazon FireTV Stick 3rd Gen (sheldon/p) - "
+SAVED=$(mktemp -d /tmp/kamakiri-boot0-backup.XXXXXX) || abort "Cannot create backup directory."
+ui_print "Saving current boot0 to $SAVED/boot0.bin (ADB pull before reboot to keep it)."
+toybox dd if="$BOOT0" of="$SAVED/boot0.bin" bs=512 count="$boot0_sectors" 2>/dev/null || abort "Cannot back up boot0."
+[ "$(wc -c < "$SAVED/boot0.bin")" -eq "$((boot0_sectors * 512))" ] || abort "Incomplete boot0 backup."
+if [ "$FLASH_BOOT" = 1 ]; then
+    toybox dd if="$BOOT" of="$SAVED/boot.img" bs=512 count="$boot_blocks" 2>/dev/null || abort "Cannot back up boot image."
+    [ "$(wc -c < "$SAVED/boot.img")" -eq "$((boot_blocks * 512))" ] || abort "Incomplete boot image backup."
+fi
 
-TMPDIR=/dev/tmp
-INSTALLER=$TMPDIR/install
+RESTORE_RO=$old_ro
+printf '0\n' > "$RO" || abort "Cannot unlock boot0 writes."
+# Backup slot first; never reach the primary slot if its write/readback fails.
+for block in 4096 1024; do
+    ui_print "Updating payload at boot0 LBA $block..."
+    toybox dd if="$TMP/arm64/payload.bin" of="$BOOT0" bs=512 seek="$block" conv=notrunc 2>/dev/null \
+        || abort "Payload write failed at LBA $block; stopping. Backup: $SAVED"
+    sync || abort "Payload sync failed; stopping. Backup: $SAVED"
+    toybox dd if="$BOOT0" of="$TMP/readback.bin" bs=512 skip="$block" count="$((PAYLOAD_SIZE / 512))" 2>/dev/null \
+        || abort "Cannot read back payload at LBA $block."
+    [ "$(file_sha256 "$TMP/readback.bin")" = "$PAYLOAD_SHA" ] || abort "Payload readback failed at LBA $block; stopping."
+done
+printf '%s\n' "$old_ro" > "$RO" || abort "Cannot restore boot0 force_ro."
+RESTORE_RO=
 
-rm -rf $TMPDIR 2>/dev/null
-mkdir -p $INSTALLER 2>/dev/null
-
-unzip -o "$ZIP" 'arm64/*' -d $INSTALLER >&2
-
-abort() { ui_print "$1"; exit 1; }
-
-##########################################################################################
-# Main
-##########################################################################################
-
-ui_print " "
-ui_print "kamakiri ARM64 updater"
-
-command -v sha256sum >/dev/null 2>&1 || abort "! sha256sum not available, cannot verify LK"
-
-ui_print "- verifying LK (g_is_64bit_kernel is pinned to this LK)"
-dd if=${PART_PREFIX}/by-name/lk bs=512 count=${LK_BLOCKS} 2>/dev/null | sha256sum | grep -q "^${LK_SHA256}" \
-  || abort "! LK mismatch: expected ${LK_SHA256}. DO NOT flash this payload on another LK."
-
-ui_print "- verifying image"
-[ "$(dd if=${INSTALLER}/arm64/boot-arm64-kamakiri.img bs=1 skip=1024 count=8 2>/dev/null)" = "ANDROID!" ] \
-  || abort "! bad image: no ANDROID! header at 0x400"
-[ "$(dd if=${INSTALLER}/arm64/boot-arm64-kamakiri.img bs=1 skip=1088 count=22 2>/dev/null)" = "bootopt=64S3,32N2,64N2" ] \
-  || abort "! bad image: cmdline must start with bootopt=64S3,32N2,64N2"
-
-echo 0 > /sys/block/mmcblk0boot0/force_ro
-
-ui_print "- updating lk-payload"
-dd if=${INSTALLER}/arm64/payload.bin of=/dev/block/mmcblk0boot0 bs=512 seek=${PAYLOAD_BLOCK}
-
-ui_print "- updating lk-payload backup"
-dd if=${INSTALLER}/arm64/payload.bin of=/dev/block/mmcblk0boot0 bs=512 seek=${PAYLOAD_BACKUP_BLOCK}
-
-echo 1 > /sys/block/mmcblk0boot0/force_ro
-
-ui_print "- flashing ARM64 image to ${BOOT_PART}"
-dd if=${INSTALLER}/arm64/boot-arm64-kamakiri.img of=${PART_PREFIX}/by-name/${BOOT_PART}
-
-sync
-
-ui_print "- done"
-ui_print "- note: first ARM64 boot is experimental (SMC/PSCI/SMP unvalidated)"
-ui_print " "
-
-exit 0
+if [ "$FLASH_BOOT" = 1 ]; then
+    ui_print "Updating ARM64 boot image..."
+    toybox dd if="$TMP/arm64/boot-arm64-kamakiri.img" of="$BOOT" conv=notrunc 2>/dev/null || abort "Boot write failed. Backup: $SAVED"
+    sync || abort "Boot sync failed."
+    toybox dd if="$BOOT" of="$TMP/boot-sectors.bin" bs=512 count="$(((BOOT_SIZE + 511) / 512))" 2>/dev/null || abort "Cannot read back boot."
+    head -c "$BOOT_SIZE" "$TMP/boot-sectors.bin" > "$TMP/boot.bin" || abort "Cannot trim boot read."
+    [ "$(file_sha256 "$TMP/boot.bin")" = "$BOOT_SHA" ] || abort "Boot readback failed. Backup: $SAVED"
+else
+    ui_print "Boot image/ROM untouched; only the ARM32/ARM64 selector was updated."
+fi
+ui_print "Done. GPT, preloader, LK, TZ, RPMB and recovery were not changed."
+ui_print "No automatic reboot. Keep the backup with ADB before rebooting."
