@@ -1,0 +1,84 @@
+#!/sbin/sh
+# Standalone Sheldon GPT update: no Kamakiri installation or filesystem changes.
+set -eu
+
+OUTFD=$2
+ZIP=$3
+DEV=/dev/block/mmcblk0
+PRIMARY_SHA=__PRIMARY_SHA256__
+BACKUP_SHA=__BACKUP_SHA256__
+ORIGINAL_PRIMARY_SHA=__ORIGINAL_PRIMARY_SHA256__
+ORIGINAL_BACKUP_SHA=__ORIGINAL_BACKUP_SHA256__
+
+ui_print() { printf 'ui_print %s\nui_print\n' "$*" > "/proc/self/fd/$OUTFD"; }
+abort() { ui_print "! $*"; exit 1; }
+file_sha256() { sha256sum "$1" | awk '{print $1}'; }
+
+[ -n "$(getprop ro.twrp.version)" ] || abort "Install from TWRP, not Android."
+case "$(getprop ro.product.device)" in
+    sheldon|sheldonp) ;;
+    *) abort "This GPT is only for the verified Sheldon layout." ;;
+esac
+command -v sha256sum >/dev/null 2>&1 || abort "sha256sum is required."
+# Sheldon TWRP\'s standalone dd has 32-bit offsets; Toybox handles the whole eMMC.
+command -v toybox >/dev/null 2>&1 || abort "Toybox is required for 64-bit eMMC offsets."
+read -r sectors < /sys/class/block/mmcblk0/size
+read -r sector_size < /sys/class/block/mmcblk0/queue/logical_block_size
+[ "$sectors" = 15273600 ] && [ "$sector_size" = 512 ] || abort "Wrong eMMC geometry."
+[ -b "$DEV" ] || abort "eMMC block device not found."
+
+TMP=$(mktemp -d /tmp/gpt-openwrt.XXXXXX) || abort "Cannot create temporary directory."
+trap 'rm -rf "$TMP"' 0
+trap 'exit 1' HUP INT TERM
+unzip -o "$ZIP" gpt/gpt-primary.bin gpt/gpt-backup.bin -d "$TMP" >/dev/null || abort "Cannot extract GPT files."
+[ "$(wc -c < "$TMP/gpt/gpt-primary.bin")" -eq 17408 ] || abort "Wrong primary GPT size."
+[ "$(wc -c < "$TMP/gpt/gpt-backup.bin")" -eq 16896 ] || abort "Wrong backup GPT size."
+[ "$(file_sha256 "$TMP/gpt/gpt-primary.bin")" = "$PRIMARY_SHA" ] || abort "Primary GPT payload hash mismatch."
+[ "$(file_sha256 "$TMP/gpt/gpt-backup.bin")" = "$BACKUP_SHA" ] || abort "Backup GPT payload hash mismatch."
+
+toybox dd if="$DEV" of="$TMP/current-primary.bin" bs=512 count=34 2>/dev/null || abort "Cannot read primary GPT."
+toybox dd if="$DEV" of="$TMP/current-backup.bin" bs=512 skip=15273567 count=33 2>/dev/null || abort "Cannot read backup GPT."
+primary=$(file_sha256 "$TMP/current-primary.bin")
+backup=$(file_sha256 "$TMP/current-backup.bin")
+case "$primary" in
+    "$ORIGINAL_PRIMARY_SHA"|"$PRIMARY_SHA") ;;
+    *) abort "Unknown/corrupt primary GPT. No writes performed." ;;
+esac
+case "$backup" in
+    "$ORIGINAL_BACKUP_SHA"|"$BACKUP_SHA") ;;
+    *) abort "Unknown/corrupt backup GPT. No writes performed." ;;
+esac
+if [ "$primary" = "$PRIMARY_SHA" ] && [ "$backup" = "$BACKUP_SHA" ]; then
+    ui_print "GPT already updated."
+    exit 0
+fi
+
+# Changed entries span p10..p13; vendorless userdata is p11.
+# Match major:minor, not path spelling: TWRP may mount by-name symlinks.
+for part in 10 11 12 13; do
+    node=/sys/class/block/mmcblk0p$part/dev
+    if [ ! -f "$node" ]; then
+        case "$part" in 12|13) continue ;; esac
+        abort "Cannot identify system/userdata devices. No writes performed."
+    fi
+    read -r devnum < "$node"
+    mounted=$(awk -v devnum="$devnum" '$3 == devnum || $5 ~ /^\/(data|cache|vendor|system|system_root|rom|overlay)(\/|$)/ { print $5; exit }' /proc/self/mountinfo) \
+        || abort "Cannot inspect mounts. No writes performed."
+    [ -z "$mounted" ] || abort "Unmount Vendor, System, Cache and Data in TWRP first. Use USB/ADB sideload."
+done
+
+ui_print "Updating GPT from verified layout: expanded userdata, no entry gaps."
+ui_print "Writing backup GPT first..."
+toybox dd if="$TMP/gpt/gpt-backup.bin" of="$DEV" bs=512 seek=15273567 count=33 conv=notrunc 2>/dev/null || abort "Backup GPT write failed; primary was not touched."
+sync || abort "Cannot sync backup GPT; primary was not touched."
+toybox dd if="$DEV" of="$TMP/check-backup.bin" bs=512 skip=15273567 count=33 2>/dev/null || abort "Cannot read back backup GPT."
+[ "$(file_sha256 "$TMP/check-backup.bin")" = "$BACKUP_SHA" ] || abort "Backup GPT verification failed; primary was not touched."
+
+ui_print "Writing primary GPT..."
+toybox dd if="$TMP/gpt/gpt-primary.bin" of="$DEV" bs=512 count=34 conv=notrunc 2>/dev/null || abort "Primary GPT write failed; verified new backup remains."
+sync || abort "Cannot sync primary GPT; verified new backup remains."
+toybox dd if="$DEV" of="$TMP/check-primary.bin" bs=512 count=34 2>/dev/null || abort "Cannot read back primary GPT."
+[ "$(file_sha256 "$TMP/check-primary.bin")" = "$PRIMARY_SHA" ] || abort "Primary GPT verification failed; verified new backup remains."
+
+ui_print "Done. No partitions formatted; boot/LK/preloader were not changed."
+ui_print "REBOOT RECOVERY before using Data; recreate it only if its start moved."

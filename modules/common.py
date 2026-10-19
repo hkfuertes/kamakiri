@@ -98,6 +98,19 @@ class Device:
 
         self.dev = serial.Serial(port.device, BAUD, timeout=TIMEOUT)
 
+    def find_brom(self, crash=False):
+        self.find_device()
+        while self.preloader:
+            if not crash:
+                raise RuntimeError("Connect in BootROM mode, not preloader; use --crash for a RAM-only transition. No eMMC writes performed")
+            log("Preloader detected; attempting RAM-only crash to BootROM (no eMMC writes)")
+            self.handshake()
+            self.crash_pl()
+            self.dev.close()
+            self.dev = None
+            self.preloader = False  # find_device only sets True for a preloader PID.
+            self.find_device()
+
     def check(self, test, gold):
         if test != gold:
             raise RuntimeError("ERROR: Serial protocol mismatch, expected {} got {}".format(gold.hex(), test.hex()))
