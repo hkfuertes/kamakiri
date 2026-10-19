@@ -1,7 +1,7 @@
 # Sheldon: GPT para OpenWrt (experimental)
 
-Esta rama incluye un generador de GPT y ZIPs independientes, utilizables desde
-BootROM o TWRP. Generar los archivos no modifica la eMMC.
+Esta rama incluye un generador de GPT y un ZIP flashable desde TWRP.
+Generar los archivos no modifica la eMMC.
 Orden acordado:
 
 1. **ARM64 as-is.** Probar con el particionado y el firmware de arranque
@@ -49,7 +49,7 @@ Conserva el MBR original, nunca escribe la eMMC y exige un directorio de salida 
 ssh root@192.168.1.1 'sh -s -- /tmp/gpt-openwrt-128' < make-gpt.sh
 mkdir -p bin
 scp -O -r root@192.168.1.1:/tmp/gpt-openwrt-128 bin/
-bash makedist-gpt.sh
+bash makedist.sh --gpt-zip
 ```
 
 Los archivos quedan en `bin/gpt-openwrt-128/`:
@@ -60,8 +60,8 @@ Los archivos quedan en `bin/gpt-openwrt-128/`:
 - `layout.sfdisk`: descripción de la tabla nueva.
 
 El ZIP es `dist/sheldon-gpt-openwrt-128.zip`. No instala LK, preloader ni imágenes
-de particiones. Incluye las copias originales del GPT y los payloads SRAM necesarios
-para su método BootROM; no ejecuta el instalador completo de Kamakiri.
+de particiones. Incluye las copias originales del GPT; no ejecuta el instalador
+completo de Kamakiri.
 Comprueba dispositivo, geometría, hashes de los archivos y las dos tablas
 actuales; escribe primero el respaldo, verifica su lectura y después escribe
 y verifica la primaria. Rechaza particiones afectadas montadas y no formatea.
@@ -97,18 +97,15 @@ Generar (solo lectura de la eMMC, escritura a archivos) y empaquetar:
 ```sh
 sh make-gpt.sh --no-vendor /tmp/gpt-openwrt-64-no-vendor
 # Copiar ese directorio al host en bin/ antes de empaquetar.
-bash makedist-gpt.sh bin/gpt-openwrt-64-no-vendor
+bash makedist.sh --gpt-zip bin/gpt-openwrt-64-no-vendor
 python3 test_gpt.py bin/gpt-openwrt-64-no-vendor dist/sheldon-gpt-openwrt-64-no-vendor.zip
 ```
 
 Salida: `bin/gpt-openwrt-64-no-vendor/{gpt-primary,gpt-backup}.bin` y
-`dist/sheldon-gpt-openwrt-64-no-vendor.zip` (TWRP/BootROM).
+`dist/sheldon-gpt-openwrt-64-no-vendor.zip` (TWRP).
 Tras flashear, **reiniciar recovery antes de escribir imágenes o recrear Data**;
 reflashear OpenWrt system (máximo **67108864 bytes**) y recrear userdata.
 El rootfs debe contener el firmware necesario: ya no podrá obtenerlo de vendor.
-Desde el repositorio, el flasher BootROM requiere la ruta explícita
-`bin/gpt-openwrt-64-no-vendor`; sin ruta conserva el default antiguo de 128 MiB.
-Dentro del ZIP, el default apunta a los archivos del propio paquete.
 
 ## Variante de 64 MiB con vendor
 
@@ -120,7 +117,7 @@ consecutivas, sin sobrescribir las otras variantes.
 ```sh
 sh make-gpt.sh --64 /tmp/gpt-openwrt-64
 # Copiar al host en bin/ antes de empaquetar.
-bash makedist-gpt.sh bin/gpt-openwrt-64
+bash makedist.sh --gpt-zip bin/gpt-openwrt-64
 python3 test_gpt.py bin/gpt-openwrt-64 dist/sheldon-gpt-openwrt-64.zip
 ```
 
@@ -133,26 +130,6 @@ verificado contra el manifiesto previo. Restaurar esa imagen es una operación
 separada del flasheo GPT. Esta variante permite investigar la dependencia de LK,
 pero también cambia el inicio de system: un arranque correcto no demostraría por
 sí solo que vendor era la causa del fallo.
-
-## GPT solo por BootROM
-
-```sh
-make -C brom-payload stage1/stage1.bin stage2/stage2.bin
-sudo ./gpt-bootrom-flash.sh --crash
-```
-
-Iniciar el script antes de conectar el stick. `--crash` permite intentar el salto
-preloader → BROM solo en RAM; antes de cargar el payload SRAM o escribir se exige
-que el dispositivo vuelva a enumerarse en BROM. Sin el flag se requiere BROM
-directo; fastboot no es un modo de entrada válido. Reutiliza el exploit y los
-payloads en SRAM; no ejecuta `main.py` ni `fixgpt`, que continuarían con la
-instalación completa de Kamakiri.
-
-Solo escribe los 33 sectores del respaldo y los 34 de la primaria, en ese orden,
-con lectura de verificación antes de continuar. Guarda las tablas anteriores en
-`bin/gpt-before-brom-*/`; rechaza otro dispositivo, archivos alterados o una GPT
-actual desconocida. No toca boot0, RPMB, LK, preloader, MISC ni recovery; tampoco
-formatea ni reinicia. Desconectar/reconectar después para abandonar el payload SRAM.
 
 ## Flasheo manual con `dd`
 
@@ -216,11 +193,8 @@ Kamakiri: reinstalar Kamakiri por sí solo no reconstruye los datos eliminados.
 
 ## Relación con el payload ARM64
 
-El ZIP GPT es independiente: `dist/sheldon-gpt-openwrt-128.zip`. También admite
-TWRP o BootROM: descomprimir y ejecutar `sudo ./gpt-bootrom-flash.sh --crash`
-en su carpeta; omitir el flag si ya se conecta directamente en BROM.
-Ambos ZIP incluyen SRAM payloads, módulos y checksums, sin firmware de instalación.
+El ZIP GPT es independiente: `dist/sheldon-gpt-openwrt-128.zip` (TWRP).
 Si se usan ambos, actualizar primero el payload, después GPT y **reiniciar recovery
-antes de recrear userdata**. Los README incluidos explican el alcance de cada ZIP.
+antes de recrear userdata**.
 
 La actualización del payload se documenta en [ARM64.md](ARM64.md).

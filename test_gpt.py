@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Check make-gpt.sh output without accessing any device."""
-import contextlib
 import hashlib
-import io
 import os
 from pathlib import Path
 import struct
@@ -191,84 +189,6 @@ command -p dd "$@"
     print("PASS: ZIP installer guards, backup-write failure, both-copy update, unchanged LK, idempotence (host simulation)")
 
 
-def check_brom(directory):
-    sys.path.insert(0, str(Path(__file__).resolve().parent / "modules"))
-    from gpt_flash import REGIONS, flash_gpt, load_images
-
-    images = load_images(directory)
-
-    class Device:
-        def __init__(self):
-            self.blocks, self.writes, self.part = {}, [], None
-            self.device_type, self.corrupt = b"A31DTMEEVDDOIV", False
-            for name, start, count, _ in REGIONS:
-                data = (directory / f"original-{name}.bin").read_bytes()
-                self.blocks.update({start + i: data[i * 512:(i + 1) * 512] for i in range(count)})
-
-        def idme_read(self, key):
-            assert key == b"device_type_id"
-            return self.device_type
-
-        def emmc_switch(self, part):
-            assert part == 0, "BROM flasher touched boot0/boot1"
-            self.part = part
-
-        def emmc_read(self, sector):
-            assert self.part == 0 and sector in self.blocks
-            return self.blocks[sector]
-
-        def emmc_write(self, sector, data):
-            assert self.part == 0 and sector in self.blocks and len(data) == 512
-            self.writes.append(sector)
-            if self.corrupt and sector == 15273567:
-                data = bytes([data[0] ^ 1]) + data[1:]
-            self.blocks[sector] = data
-
-        def kick_watchdog(self):
-            pass
-
-    with tempfile.TemporaryDirectory() as tmp:
-        def apply(dev, targets=images):
-            with contextlib.redirect_stdout(io.StringIO()):
-                return flash_gpt(dev, targets, Path(tmp))
-
-        dev = Device()
-        saved = apply(dev)
-        assert dev.writes == list(range(15273567, 15273600)) + list(range(34))
-        for name, start, count, _ in REGIONS:
-            assert b"".join(dev.blocks[start + i] for i in range(count)) == images[name]
-            assert (saved / f"original-{name}.bin").read_bytes() == (directory / f"original-{name}.bin").read_bytes()
-        dev.writes.clear()
-        apply(dev)  # Reflashing the target layout is also accepted.
-        assert len(dev.writes) == 67
-
-        other_name = "gpt-openwrt-128" if directory.name.endswith("-no-vendor") else "gpt-openwrt-64-no-vendor"
-        other = load_images(directory.with_name(other_name))
-        for failure in ("target", "mixed", "device", "current", "readback"):
-            dev, targets = Device(), dict(images)
-            if failure == "target":
-                targets["primary"] = b"x" + targets["primary"][1:]
-            elif failure == "mixed":
-                targets["backup"] = other["backup"]
-            elif failure == "device":
-                dev.device_type = b"another-device"
-            elif failure == "current":
-                dev.blocks[0] = bytes(512)
-            else:
-                dev.corrupt = True
-            try:
-                apply(dev, targets)
-            except RuntimeError:
-                pass
-            else:
-                raise AssertionError(f"BROM flasher accepted {failure} failure")
-            if failure == "readback":
-                assert dev.writes and min(dev.writes) >= 15273567, "Primary touched after backup failure"
-            else:
-                assert not dev.writes, f"BROM flasher wrote after {failure} failure"
-    print("PASS: BROM GPT-only bounds, backups, readback, device/input guards, idempotence (simulation)")
-
-
 def check_definition(directory, primary, without_vendor, system_size):
     # Exercise the actual generator's GUID expansion, not a second template.
     source = Path(__file__).with_name("make-gpt.sh").read_text()
@@ -341,7 +261,6 @@ def main():
           f"userdata={(15273567 - userdata_start) / 2048:.3f} MiB (p{system_number + 1}), no entry gaps")
     print("PASS: both GPT CRCs, no overlaps, unchanged MBR/other partitions/GUIDs")
     check_definition(directory, primary, without_vendor, system_size)
-    check_brom(directory)
     if len(sys.argv) > 2:
         check_zip(directory, sys.argv[2])
 

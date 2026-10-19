@@ -23,7 +23,6 @@ trap 'exit 1' HUP INT TERM
 
 dd if="$DEV" of="$OUT/original-primary.bin" bs=512 count=34
 dd if="$DEV" of="$OUT/original-backup.bin" bs=512 skip=$((SECTORS - 33)) count=33
-# ponytail: pinned to this stick's GPT; recheck the layout/hash for another device.
 ACTUAL=$(dd if="$OUT/original-primary.bin" bs=512 skip=2 count=32 | sha256sum | awk '{print $1}')
 case "$ACTUAL" in
     25aea305a221daf2204d7ca7f0d1af571d4944b272c450cbe36a0e9d99a5d26a|\

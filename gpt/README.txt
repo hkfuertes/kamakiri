@@ -1,6 +1,6 @@
 Sheldon OpenWrt GPT: three layouts; see the root README and layout.sfdisk
 
-The ZIP supports TWRP or standalone BootROM. It does not install Kamakiri or
+The ZIP installs from TWRP. It does not install Kamakiri or
 write boot0. Only the verified 15273600-sector Sheldon/Sheldonp eMMC is supported.
 Pinned to the source dump GUIDs; rebuild/review hashes after restoring another GPT.
 
@@ -29,8 +29,8 @@ stock TWRP unzip/32-bit-offset/disabled-conv problems. Nothing is formatted or m
 REBOOT RECOVERY after flashing, BEFORE formatting or writing partition images.
 Then recreate userdata and, for the vendorless layout, reflash OpenWrt system.
 The system image must fit 64 MiB (67108864 bytes) for either 64 MiB variant.
-TWRP accepts the packaged original or target GPT; BootROM also accepts the other
-explicitly pinned profiles. Neither method repairs filesystem data.
+TWRP accepts the packaged original or target GPT. This does not repair
+filesystem data.
 Use labels, not partition numbers/UUID assumptions. OpenWrt must include its own
 required firmware; /vendor is no longer available in the vendorless variant.
 Do not apply from installed OpenWrt while /rom or /overlay is mounted.
