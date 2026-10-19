@@ -15,7 +15,6 @@ static int bootimg_is_arm64(const void *image, uint32_t size)
         if (header[i] != magic[i])
             return 0;
 
-    // ponytail: accept only Sheldon's canonical bootopt as the first argument.
     for (unsigned i = 0; i < sizeof(option) - 1; ++i)
         if (header[0x40 + i] != option[i])
             return 0;
