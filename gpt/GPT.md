@@ -4,139 +4,90 @@ This directory is a self-contained project inside the kamakiri monorepo: a
 GPT generator plus a TWRP-flashable zip, independent of the parent kamakiri
 installer. Generating the files never modifies the eMMC.
 
-Agreed order:
+## Layout
 
-1. **ARM64 as-is.** Test with the current partitioning and boot firmware.
-   Only the payload and the boot image change; names and sizes are kept.
-2. **Reclaim space without touching `vendor` or the rescue partitions.**
-   Shrink `system` (`/rom`) to **128 MiB**, drop `cache` and hand the space
-   to `userdata` (`/overlay`): **7129.796 MiB**. `recovery` and every other
-   partition keep their names, positions, sizes and GUIDs. The new GPT has
-   consecutive entries: `system` is p11 and `userdata` p12, no `cache`, no
-   gaps. GUIDs are preserved; mounts must use labels, not p13.
-3. **Prepared vendorless variant: 64 MiB system.** `system` becomes p10,
-   LBA 102400..233471; `userdata` p11, LBA 233472..15273566 (**7343.796
-   MiB**). p1..p9 and the labels are kept; no gaps remain. Applying it is
-   still pending validation/preservation of the needed firmware. Only once
-   it has been verified that the firmware available for mainline suffices
-   for the target hardware, and the required blobs/data have been preserved,
-   remove `vendor` and re-adjust the layout to use its space.
+One parameterized layout:
+
+- `cache` is **removed**.
+- `vendor` and every other partition keep their position, size and GUID.
+- `system` is p11, starting at LBA 409600, sized `SYSTEM_MIB` MiB
+  (**default 64**; the only parameter, in both the generator and the
+  packager).
+- `userdata` is p12, from the end of system to the last usable LBA
+  (7193.796 MiB at the default 64 MiB).
+
+Entries are consecutive, no gaps. Labels and GUIDs are preserved; mounts
+must use labels, not partition numbers.
 
 The OTA `vendor` partition contains Android HAL/libraries, Android kernel
 modules and firmware, including `WIFI_RAM_CODE_MT7663.bin`,
-`mt7663_patch_e2_hdr.bin` and `EEPROM_MT7663.bin`. The Android modules are
-useless for mainline; whatever blobs/data their drivers need can be packaged
-into the rootfs. `vendor` stays intact during steps 1 and 2; its removal is
-deferred to step 3.
+`mt7663_patch_e2_hdr.bin` and `EEPROM_MT7663.bin`. It stays intact; if a
+mainline driver ever needs one of those blobs, package it in the rootfs.
 
-Step 2 keeps the current dependencies: `lk`, `boot`, `recovery` and `MISC`
+Step keeps the current dependencies: `lk`, `boot`, `recovery` and `MISC`
 are looked up by name among the first 16 GPT entries, 128 bytes each from
-LBA 2; the installer also requires `tee1`. Dropping `recovery` at any other
-point would require adapting the boot flow, the MISC flags and the
-installers.
+LBA 2; the installer also requires `tee1`. Dropping `recovery` would
+require adapting the boot flow, the MISC flags and the installers.
 
-## Generating the GPT and the zip
+## Generating the GPT (on the device)
 
-`make-gpt.sh` runs on OpenWrt with `sfdisk` already installed. It is pinned
-to the GPT read from this stick and to its 15273600-sector / 512-byte eMMC;
-it only accepts verified tables and takes the GUIDs from the original dump.
-Binaries and installers are pinned to the GUID profile used to build them;
-after restoring another GPT, regenerate the files and review the hashes.
-It builds a GPT **from scratch**, with a complete 12-partition definition
-(11 in the vendorless variant), over an empty sparse file: it does not
-resize or reorder a previous table. It keeps the original MBR, never writes
-the eMMC and requires a fresh output directory:
+`make-gpt.sh` runs on OpenWrt with `sfdisk` already installed. It is
+pinned to the GPT read from this stick and to its 15273600-sector /
+512-byte eMMC; it only accepts verified tables (pinned SHA256 allowlist)
+and takes the GUIDs from the original dump. Binaries and installers are
+pinned to the GUID profile used to build them; after restoring another
+GPT, regenerate the files and review the hashes. It builds a GPT **from
+scratch**, with a complete 12-partition definition, over an empty sparse
+file: it does not resize or reorder a previous table. It keeps the
+original MBR, never writes the eMMC and requires a fresh output directory:
 
 ```sh
-ssh root@192.168.1.1 'sh -s -- /tmp/gpt-openwrt-128' < make-gpt.sh
+ssh root@192.168.1.1 'sh -s -- /tmp/gpt-openwrt' < make-gpt.sh
+# ...or with an explicit system size: 'sh -s -- 128 /tmp/gpt-openwrt'
 mkdir -p bin
-scp -O -r root@192.168.1.1:/tmp/gpt-openwrt-128 bin/
+scp -O -r root@192.168.1.1:/tmp/gpt-openwrt bin/
 ./makedist.sh
 ```
 
 All commands run from this `gpt/` directory. The files land in
-`bin/gpt-openwrt-128/`:
+`bin/gpt-openwrt/`:
 
 - `gpt-primary.bin`: 34 sectors, from LBA 0 (includes the original MBR).
 - `gpt-backup.bin`: 33 sectors, from LBA 15273567.
 - `original-primary.bin` and `original-backup.bin`: previous copies.
 - `layout.sfdisk`: description of the new table.
 
-The zip is `dist/sheldon-gpt-openwrt-128.zip`. It installs no LK, preloader
-or partition images. It includes the original GPT copies; it does not run
-the full kamakiri installer. It checks device, geometry, file hashes and
-both current tables; it writes the backup first, verifies the readback,
-then writes and verifies the primary. It refuses to proceed with affected
-partitions mounted and never formats. TWRP extracts exact entry names (its
-`unzip` does not expand globs) and uses `toybox dd`: the standalone `dd` in
-this recovery does not support the end-of-eMMC offsets.
+## Packaging and flashing
 
-**In TWRP:** unmount System, Cache and Data; use USB or ADB sideload if the
-zip was stored on Data. After flashing, **reboot recovery before wiping or
-recreating `userdata`**: the kernel may still be using the old map. Coming
-from stock, its boot changes too: changing the GPT does not move its ext4.
-If you only move from the experimental p13 layout to p12 with the same
-limits, no reformat is needed. The user recreates it; check its
-mount/label and sysupgrade compatibility. The previous ROM observed over
-UART contains `sheldon-overlay-init`, which rejects the new geometry with
+`./makedist.sh [SYSTEM_MIB] [INPUT_DIR]` validates the input with
+`test_gpt.py`, refuses if the directory's system size does not match
+`SYSTEM_MIB`, stages the data, fills the SHA256 guards in the installer,
+zips and re-validates. Output: `dist/sheldon-gpt-openwrt-<SYSTEM_MIB>.zip`.
+It installs no LK, preloader or partition images; it does not run the full
+kamakiri installer. It checks device, geometry, file hashes and both
+current tables; it writes the backup first, verifies the readback, then
+writes and verifies the primary. It refuses to proceed with affected
+partitions mounted and never formats. TWRP extracts exact entry names
+(its `unzip` does not expand globs) and uses `toybox dd`: the standalone
+`dd` in this recovery does not support the end-of-eMMC offsets.
+
+**In TWRP:** unmount System, Cache and Data; use USB or ADB sideload if
+the zip was stored on Data. After flashing, **reboot recovery before
+wiping or recreating `userdata`**: the kernel may still be using the old
+map. Coming from stock, its boot changes too: changing the GPT does not
+move its ext4. The user recreates it; check its mount/label and sysupgrade
+compatibility. The previous ROM observed over UART contains
+`sheldon-overlay-init`, which rejects the new geometry with
 `Stock geometry mismatch`. That initializer must also be adapted to the
-`userdata` layout/label; generating or flashing another GPT does not remove
-that check.
+`userdata` layout/label; generating or flashing another GPT does not
+remove that check.
 
 Reproducible host-side check, including a simulation of the installer over
 a sparse file (no real devices):
 
 ```sh
-python3 test_gpt.py bin/gpt-openwrt-128 dist/sheldon-gpt-openwrt-128.zip
+python3 test_gpt.py bin/gpt-openwrt dist/sheldon-gpt-openwrt-64.zip
 ```
-
-## 64 MiB vendorless variant
-
-The previous 128 MiB with-vendor variant is kept; its binaries and zip are
-not overwritten. The new one keeps the labels and retained GUIDs, but
-**physically moves system and userdata**. The GPT does not move their
-contents. The user-updated OpenWrt uses labels, with no dependence on UUIDs
-or partition numbers.
-
-Generate (read-only on the eMMC, writes to files) and package:
-
-```sh
-sh make-gpt.sh --no-vendor /tmp/gpt-openwrt-64-no-vendor
-# Copy that directory into bin/ before packaging.
-./makedist.sh bin/gpt-openwrt-64-no-vendor
-python3 test_gpt.py bin/gpt-openwrt-64-no-vendor dist/sheldon-gpt-openwrt-64-no-vendor.zip
-```
-
-Output: `bin/gpt-openwrt-64-no-vendor/{gpt-primary,gpt-backup}.bin` and
-`dist/sheldon-gpt-openwrt-64-no-vendor.zip` (TWRP).
-After flashing, **reboot recovery before writing images or recreating
-Data**; reflash the OpenWrt system (at most **67108864 bytes**) and
-recreate userdata. The rootfs must carry the needed firmware: it can no
-longer come from vendor.
-
-## 64 MiB with-vendor variant
-
-Keeps p1..p10, including the 150 MiB vendor in its original position.
-System is p11, LBA 409600..540671 (64 MiB); userdata is p12, LBA
-540672..15273566 (7193.796 MiB). Cache stays removed. Labels, GUIDs and
-consecutive entries are preserved, without overwriting the other variants.
-
-```sh
-sh make-gpt.sh --64 /tmp/gpt-openwrt-64
-# Copy into bin/ before packaging.
-./makedist.sh bin/gpt-openwrt-64
-python3 test_gpt.py bin/gpt-openwrt-64 dist/sheldon-gpt-openwrt-64.zip
-```
-
-Coming from the vendorless variant, system goes back from 50 to 200 MiB:
-the GPT does not move the rootfs or restore overwritten vendor data.
-Reboot recovery before writing images or recreating userdata; the system
-image must fit in 67108864 bytes. An original vendor copy exists in
-`bin/gpt-before-64-no-vendor-20261017-221330/vendor.img` (150 MiB), its
-SHA256 verified against the previous manifest. Restoring that image is an
-operation separate from GPT flashing. This variant allows investigating
-the LK dependency, but it also changes the start of system: a correct boot
-would not by itself prove that vendor was the cause of the failure.
 
 ## Manual flashing with `dd`
 
@@ -148,8 +99,8 @@ comparison fails, stop.
 From the host, with TWRP booted and ADB connected:
 
 ```sh
-python3 test_gpt.py bin/gpt-openwrt-128
-adb push bin/gpt-openwrt-128/*.bin /tmp/
+python3 test_gpt.py bin/gpt-openwrt
+adb push bin/gpt-openwrt/*.bin /tmp/
 adb shell
 ```
 
@@ -202,7 +153,7 @@ deleted data.
 
 ## Relation to the ARM64 payload
 
-The GPT zip is independent: `dist/sheldon-gpt-openwrt-128.zip` (TWRP). If
+The GPT zip is independent: `dist/sheldon-gpt-openwrt-64.zip` (TWRP). If
 you use both, update the payload first, then the GPT, and **reboot recovery
 before recreating userdata**.
 

@@ -189,21 +189,20 @@ command -p dd "$@"
     print("PASS: ZIP installer guards, backup-write failure, both-copy update, unchanged LK, idempotence (host simulation)")
 
 
-def check_definition(directory, primary, without_vendor, system_size):
+def check_definition(directory, primary, system_size):
     # Exercise the actual generator's GUID expansion, not a second template.
     source = Path(__file__).with_name("make-gpt.sh").read_text()
     helpers = source[source.index("guid() {"):source.index("\n# A sparse")]
     rendered = subprocess.run(
         ["sh", "-c", 'OUT=$1\n' + helpers + '\ndefinition "$2"\n',
-         "generator-check", str(directory.resolve()),
-         "--no-vendor" if without_vendor else "--64" if system_size == 131072 else ""],
+         "generator-check", str(directory.resolve()), str(system_size // 2048)],
         check=True, capture_output=True, text=True,
     ).stdout
     disk_guid = str(uuid.UUID(bytes_le=primary[568:584]))
     assert "label-id: " + disk_guid in rendered.lower()
     rows = [line for line in rendered.splitlines() if line.startswith("start=")]
-    assert len(rows) == (11 if without_vendor else 12)
-    assert ('name="vendor"' not in (directory / "layout.sfdisk").read_text()) == without_vendor
+    assert len(rows) == 12
+    assert 'name="vendor"' in (directory / "layout.sfdisk").read_text()
     for i, row in enumerate(rows):
         fields = dict(field.strip().split("=", 1) for field in row.split(","))
         entry = primary[1024 + i * 128:1024 + (i + 1) * 128]
@@ -229,11 +228,11 @@ def main():
         "6cec64797a3a22e125fdd06c871a2f009a4209b3c7c61104b82a8e68c9c3cf93",
     }
     without_vendor = not any(name == "vendor" for _, _, _, name in parts)
-    system_number = 10 if without_vendor else 11
-    system_start = 102400 if without_vendor else 409600
+    assert not without_vendor, "vendor must be retained"
+    system_number = 11
+    system_start = 409600
     system_size = next(end - start + 1 for start, end, _, name in parts if name == "system")
-    assert system_size in (131072, 262144)
-    assert not without_vendor or system_size == 131072
+    assert system_size > 0 and system_size % 2048 == 0
     userdata_start = system_start + system_size
     expected = bytearray(len(old_table))
     preserved = system_number - 1
@@ -253,14 +252,14 @@ def main():
         for offset in (16, 88):
             old[offset:offset + 4] = new[offset:offset + 4] = bytes(4)
         assert old == new, "Unexpected GPT header change"
-    assert len(old_parts) in (11, 12, 13) and len(parts) == system_number + 1
+    assert len(old_parts) in (11, 12, 13) and len(parts) == 12
     assert [number for _, _, number, _ in parts] == list(range(1, len(parts) + 1)), "GPT entry gaps"
     assert (system_start, userdata_start - 1, system_number, "system") in parts
     assert (userdata_start, 15273566, system_number + 1, "userdata") in parts
     print(f"PASS: system={system_size / 2048:g} MiB (p{system_number}), "
           f"userdata={(15273567 - userdata_start) / 2048:.3f} MiB (p{system_number + 1}), no entry gaps")
     print("PASS: both GPT CRCs, no overlaps, unchanged MBR/other partitions/GUIDs")
-    check_definition(directory, primary, without_vendor, system_size)
+    check_definition(directory, primary, system_size)
     if len(sys.argv) > 2:
         check_zip(directory, sys.argv[2])
 

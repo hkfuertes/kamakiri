@@ -5,15 +5,17 @@
 set -e
 cd "$(dirname "$0")"
 
-INPUT=${1:-bin/gpt-openwrt-128}
+# System partition size in MiB. Cache is always removed; vendor and every
+# other partition keep their position and size. The zip is named after it.
+SYSTEM_MIB=${1:-64}
+INPUT=${2:-bin/gpt-openwrt}
+
 python3 test_gpt.py "$INPUT"
-if ! grep -q 'name="vendor"' "$INPUT/layout.sfdisk"; then
-    NAME=sheldon-gpt-openwrt-64-no-vendor
-elif grep -Eq 'size=[[:space:]]*131072,.*name="system"' "$INPUT/layout.sfdisk"; then
-    NAME=sheldon-gpt-openwrt-64
-else
-    NAME=sheldon-gpt-openwrt-128
-fi
+size=$(sed -n 's/.*start= *409600, size= *\([0-9]*\), .*name="system".*/\1/p' "$INPUT/layout.sfdisk")
+[ "$((size / 2048))" = "$SYSTEM_MIB" ] ||
+    { echo "$INPUT has a $((size / 2048)) MiB system; pass that as the first argument" >&2; exit 1; }
+
+NAME=sheldon-gpt-openwrt-$SYSTEM_MIB
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/META-INF/com/google/android" "$STAGE/gpt" dist
