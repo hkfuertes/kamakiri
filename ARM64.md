@@ -39,6 +39,19 @@ make -C lk-payload test
 Host-only selector test: opt-in, ARM32 fallback, token and buffer bounds.
 No hardware.
 
+## Updating the payload on device
+
+```sh
+./makedist.sh --payload-only-zip
+```
+
+Builds `dist/kamakiri-lk-payload.zip`, TWRP-flashable, which only rewrites
+the payload at block 1024 of `mmcblk0boot0` (toggling `force_ro` around
+the write). Preloader, TWRP, boot and TEE partitions are untouched, so
+iterating on the payload doesn't reflash the whole stack. Default
+`makedist.sh` behavior (full staging from local `bin/` blobs) is unchanged.
+Validated on hardware.
+
 ## Original build
 
 Kamakiri build with all partitions (Fire TV Stick 3 / Lite, Sheldon):
