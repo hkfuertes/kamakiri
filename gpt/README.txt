@@ -1,4 +1,4 @@
-Sheldon OpenWrt GPT: three layouts; see the root README and layout.sfdisk
+Sheldon OpenWrt GPT: three layouts; see GPT.md and layout.sfdisk
 
 The ZIP installs from TWRP. It does not install Kamakiri or
 write boot0. Only the verified 15273600-sector Sheldon/Sheldonp eMMC is supported.
