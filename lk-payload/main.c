@@ -3,6 +3,7 @@
 #include "libc.h"
 
 #include "common.h"
+#include "bootimg.h"
 
 void low_uart_put(int ch) {
     volatile uint32_t *uart_reg0 = (volatile uint32_t*)0x11003014;
@@ -44,6 +45,11 @@ size_t read_func(struct device_t *dev, uint64_t block_off, void *dst, uint32_t s
         }
         if (sz < 0x400) {
             ret = original_read(dev, block_off + 0x400, dst, sz, part);
+            if (ret == sz) {
+                // Select before LK chooses the kernel staging/decompression path.
+                *g_is_64bit_kernel = bootimg_is_arm64(dst, sz);
+                printf("Kernel architecture: %u-bit\n", *g_is_64bit_kernel ? 64 : 32);
+            }
             ramdisk = dst + 0x14;
             rootfs_size = dst + 0x10;
             printf("ramdisk: 0x%08X\n", *ramdisk);

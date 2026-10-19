@@ -4,3 +4,9 @@ __pycache__
 amonet.log
 modules/__pycache__
 modules/amonet.log
+bin/
+dist/
+build/
+brom-payload/stage1/
+brom-payload/stage2/
+brom-payload/pl/

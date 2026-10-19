@@ -1,5 +1,20 @@
 #!/bin/bash
 
+# Flashable zip that only updates the lk-payload; the default flow below
+# stays the original (stages dist/full from local bin/ blobs).
+if [ "$1" = "--payload-only-zip" ]; then
+    rm -rf dist/lkzip dist/kamakiri-lk-payload.zip
+    make -C lk-payload
+    mkdir -p dist/lkzip/META-INF/com/google/android dist/lkzip/kamakiri/lk-payload/build
+    cp META-INF/com/google/android/update-binary-lk-payload dist/lkzip/META-INF/com/google/android/update-binary
+    cp META-INF/com/google/android/updater-script dist/lkzip/META-INF/com/google/android/
+    cp lk-payload/build/payload.bin dist/lkzip/kamakiri/lk-payload/build/
+    ( cd dist/lkzip && zip -qr -X ../kamakiri-lk-payload.zip META-INF kamakiri )
+    rm -rf dist/lkzip
+    echo "dist/kamakiri-lk-payload.zip"
+    exit 0
+fi
+
 rm -rf dist
 
 mkdir -p dist/unlock/kamakiri/bin

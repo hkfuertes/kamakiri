@@ -14,6 +14,8 @@ void (*cache_clean)(void *addr, size_t sz) = (void*)0x41e2353c;
 size_t (*video_printf)(const char *format, ...) = (void *)0x41e28243;
 
 uint32_t* g_boot_mode = (uint32_t*) 0x41E557C4;
+// Sheldon LK SHA256: 4da5843f7cbdb537520578e3e0d39e28110d7c2d2f812b4dbc9cbbdd348d6116
+volatile uint32_t* g_is_64bit_kernel = (volatile uint32_t*) 0x41E5C19C;
 
 #define PAYLOAD_DST 0x41000000
 #define PAYLOAD_SRC 0x80000

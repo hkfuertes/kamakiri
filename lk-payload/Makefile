@@ -1,4 +1,5 @@
 CC := arm-none-eabi-gcc
+HOSTCC ?= cc
 AS := arm-none-eabi-as
 LD := arm-none-eabi-gcc
 OBJCOPY := arm-none-eabi-objcopy
@@ -31,6 +32,12 @@ $(BUILD_DIR)/%.o: %.c
 $(BUILD_DIR)/%.o: %.S
 	mkdir -p $(@D)
 	$(AS) -o $@ $<
+
+.PHONY: test
+test:
+	@set -eu; test_bin=$$(mktemp); trap 'rm -f "$$test_bin"' EXIT; \
+	$(HOSTCC) -std=c99 -Wall -Wextra -Werror test_bootimg.c -o "$$test_bin"; \
+	"$$test_bin"
 
 clean:
 	-rm -rf $(BUILD_DIR)
