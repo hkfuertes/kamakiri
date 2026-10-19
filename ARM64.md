@@ -1,61 +1,40 @@
-# Sheldon: un payload para kernels ARM32 y ARM64
+# Sheldon: one payload for ARM32 and ARM64 kernels
 
-El payload de Kamakiri sigue siendo ARM32; el mismo binario permite a LK
-arrancar un kernel ARM32 o ARM64 según la cabecera de cada imagen.
-`makedist.sh` ya incluye `lk-payload/build/payload.bin`: no hace falta otro
-payload, script de distribución ni ZIP específico para ARM64.
+The Kamakiri payload stays ARM32; the same binary lets LK boot either
+kernel bitness, decided per boot image. `makedist.sh` ships it unchanged.
 
-## Selección por imagen
+## Opt-in
 
-La cmdline de la cabecera Android real debe empezar por este argumento
-completo para seleccionar ARM64:
+A real Android boot header selects ARM64 when its cmdline starts with:
 
 ```text
 bootopt=64S3,32N2,64N2
 ```
 
-Después puede terminar o continuar con un espacio o tabulador y otros
-argumentos. Las imágenes sin ese primer argumento conservan ARM32, incluidos
-el kernel stock y TWRP. La selección se hace por imagen de `boot` o `recovery`;
-no se añade soporte ARM64 a `fastboot boot`.
+It must be the first argument, followed by end-of-string, space or tab.
+Everything else — stock kernel, TWRP — stays ARM32. Covers `boot` and
+`recovery` only, not `fastboot boot`. Bitness is declared in the header,
+not detected from kernel contents (LK picks the load path before
+decompression). Don't touch the fake header in `inject_microloader.py`.
 
-No es autodetección del contenido del kernel: LK necesita elegir la ruta de
-carga antes de descomprimirlo. Un kernel ARM64 debe declararlo en su cabecera.
-No hay que cambiar la cabecera falsa del inyector existente.
+## Compatibility
 
-## Compatibilidad
+- Pinned to Kamakiri's Sheldon LK (318880 bytes, SHA256
+  `4da5843f7cbdb537520578e3e0d39e28110d7c2d2f812b4dbc9cbbdd348d6116`);
+  all payload addresses are specific to it. Don't substitute an OTA LK.
+- ARM64 image: legacy Android header (2048-byte pages), AArch64 `Image.gz`
+  + DTB, first argument as above, kernel placement per the
+  [ARM64 boot protocol](https://docs.kernel.org/arch/arm64/booting.html);
+  avoid overlapping LK (`0x41e00000..0x41f00000`), the payload
+  (`0x41000000..0x41080000`) and staging (`0x45000000`).
+- OpenWrt AArch64 seen booting with `maxcpus=1`; SMP and peripherals
+  unvalidated.
 
-Solo corresponde al LK de Kamakiri Sheldon de 318880 bytes, con SHA256:
-
-```text
-4da5843f7cbdb537520578e3e0d39e28110d7c2d2f812b4dbc9cbbdd348d6116
-```
-
-Las direcciones del payload son específicas de ese LK; no sustituirlo por el
-de una OTA reciente. El selector no verifica ese hash en ejecución.
-
-La imagen ARM64 necesita una cabecera Android legacy con página de 2048 bytes,
-`Image.gz` y un DTB compatible. No convierte el zImage ARM32 de la OTA en ARM64.
-Hay que respetar la alineación y colocación del kernel, los límites de la
-partición, las reservas del firmware/DTB y el
-[protocolo de entrada ARM64](https://docs.kernel.org/arch/arm64/booting.html).
-LK limita la salida del descompresor a 28 MiB; no solapar kernel/DTB/initramfs
-con LK (`0x41e00000..0x41f00000`), el payload activo
-(`0x41000000..0x41080000`) ni el staging (`0x45000000`).
-
-Se observó OpenWrt AArch64 arrancando con `maxcpus=1`; no valida SMP ni todos
-los periféricos.
-
-## Distribución y comprobación
-
-Los instaladores originales quedan sin cambios. Son instalaciones completas;
-**no usarlos como actualización de solo payload**. Esta rama no incluye los
-actualizadores independientes BootROM/TWRP ni flashea automáticamente un kernel.
+## Test
 
 ```sh
 make -C lk-payload test
 ```
 
-La prueba ejecuta solo el selector en el host: comprueba ARM64 explícito,
-ARM32 por defecto, tokens y límites de lectura. No accede al dispositivo ni
-valida el arranque real.
+Host-only selector test: opt-in, ARM32 fallback, token and buffer bounds.
+No hardware.
