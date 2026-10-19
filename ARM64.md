@@ -38,3 +38,8 @@ make -C lk-payload test
 
 Host-only selector test: opt-in, ARM32 fallback, token and buffer bounds.
 No hardware.
+
+## Original build
+
+Kamakiri build with all partitions (Fire TV Stick 3 / Lite, Sheldon):
+<https://xdaforums.com/t/unlock-root-twrp-unbrick-fire-tv-stick-3-and-fire-tv-stick-lite-sheldon-p.4410297/>
