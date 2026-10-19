@@ -71,8 +71,9 @@ partitions mounted and never formats. TWRP extracts exact entry names
 (its `unzip` does not expand globs) and uses `toybox dd`: the standalone
 `dd` in this recovery does not support the end-of-eMMC offsets.
 
-**In TWRP:** unmount System, Cache and Data; use USB or ADB sideload if
-the zip was stored on Data. After flashing, **reboot recovery before
+**In TWRP:** the installer unmounts System, Cache, Vendor and Data itself
+and aborts without writing if a mount cannot be released; use USB or ADB
+sideload if the zip was stored on Data. After flashing, **reboot recovery before
 wiping or recreating `userdata`**: the kernel may still be using the old
 map. Coming from stock, its boot changes too: changing the GPT does not
 move its ext4. The user recreates it; check its mount/label and sysupgrade

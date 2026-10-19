@@ -90,6 +90,7 @@ done
 command -p unzip "$@"
 ''',
             "toybox": '#!/bin/sh\n[ "$1" = dd ] || exit 1\nshift\nDD_LARGEFILE=1 exec dd "$@"\n',
+            "umount": '#!/bin/sh\n[ "${UMOUNT_FAILS:-0}" = 1 ] && exit 1\nawk -v m="$1" \x27$5 != m && index($5, m "/") != 1\x27 "$FAKE_MOUNTINFO" > "$FAKE_MOUNTINFO.new" && mv "$FAKE_MOUNTINFO.new" "$FAKE_MOUNTINFO"\n',
             "dd": '''#!/bin/sh
 for arg do
     case "$arg" in
@@ -134,7 +135,7 @@ command -p dd "$@"
             return subprocess.run(
                 ["sh", str(script), "3", "1", str(Path(archive).resolve())],
                 env={**os.environ, "PATH": str(tools) + os.pathsep + os.environ["PATH"],
-                     "FAKE_DISK": str(disk), **(extra_env or {})},
+                     "FAKE_DISK": str(disk), "FAKE_MOUNTINFO": str(root / "mountinfo"), **(extra_env or {})},
                 capture_output=True, text=True, timeout=30,
             )
 
@@ -145,9 +146,9 @@ command -p dd "$@"
             mounts += ["259:2 / /unusual-alias", "253:0 / /vendor"]
         for mount in mounts:
             (root / "mountinfo").write_text(f"1 0 {mount} rw - ext4 /dev/root rw\n")
-            result = run()
-            assert result.returncode != 0 and "Unmount" in result.stdout, result.stdout + result.stderr
-            assert snapshot() == before, "Installer wrote while userdata was mounted"
+            result = run({"UMOUNT_FAILS": "1"})
+            assert result.returncode != 0 and "Cannot unmount" in result.stdout, result.stdout + result.stderr
+            assert snapshot() == before, "Installer wrote while a mount was not released"
         (root / "mountinfo").write_text("")
         for part in ((10, 11) if without_vendor else (11,)):
             node = root / "sys" / f"mmcblk0p{part}/dev"
@@ -161,10 +162,6 @@ command -p dd "$@"
         if without_vendor:
             for part in (12, 13):
                 (root / "sys" / f"mmcblk0p{part}/dev").unlink()
-        (root / "mountinfo").write_text("1 0 259:3 / /unusual-alias rw - ext4 /dev/root rw\n")
-        result = run()
-        assert result.returncode != 0 and "Unmount" in result.stdout
-        assert snapshot() == before
         (root / "mountinfo").write_text("")
         with disk.open("r+b") as f:
             f.seek(512)
@@ -178,8 +175,12 @@ command -p dd "$@"
         result = run({"FAIL_GPT_WRITE": "1"})
         assert result.returncode != 0 and "Backup GPT write failed" in result.stdout, result.stdout + result.stderr
         assert snapshot() == before, "Primary GPT changed after backup write failure"
+        # A mounted affected partition is unmounted automatically, then the flash proceeds.
+        (root / "mountinfo").write_text("1 0 259:4 / /cache rw - ext4 /dev/root rw\n")
         result = run()
         assert result.returncode == 0, result.stdout + result.stderr
+        assert "Unmounting /cache" in result.stdout, result.stdout
+        assert (root / "mountinfo").read_text() == "", "cache was not unmounted"
         after = snapshot()
         assert after[:2] == ((directory / "gpt-primary.bin").read_bytes(), (directory / "gpt-backup.bin").read_bytes())
         assert after[2] == before[2], "Installer wrote partition contents"

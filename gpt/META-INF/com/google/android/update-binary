@@ -55,6 +55,9 @@ fi
 
 # Changed entries span p10..p13; vendorless userdata is p11.
 # Match major:minor, not path spelling: TWRP may mount by-name symlinks.
+find_mounted() {
+    awk -v devnum="$1" '$3 == devnum || $5 ~ /^\/(data|cache|vendor|system|system_root|rom|overlay)(\/|$)/ { print $5; exit }' /proc/self/mountinfo
+}
 for part in 10 11 12 13; do
     node=/sys/class/block/mmcblk0p$part/dev
     if [ ! -f "$node" ]; then
@@ -62,9 +65,12 @@ for part in 10 11 12 13; do
         abort "Cannot identify system/userdata devices. No writes performed."
     fi
     read -r devnum < "$node"
-    mounted=$(awk -v devnum="$devnum" '$3 == devnum || $5 ~ /^\/(data|cache|vendor|system|system_root|rom|overlay)(\/|$)/ { print $5; exit }' /proc/self/mountinfo) \
-        || abort "Cannot inspect mounts. No writes performed."
-    [ -z "$mounted" ] || abort "Unmount Vendor, System, Cache and Data in TWRP first. Use USB/ADB sideload."
+    mounted=$(find_mounted "$devnum") || abort "Cannot inspect mounts. No writes performed."
+    [ -z "$mounted" ] && continue
+    ui_print "Unmounting $mounted..."
+    umount "$mounted" 2>/dev/null || true
+    mounted=$(find_mounted "$devnum") || abort "Cannot inspect mounts. No writes performed."
+    [ -z "$mounted" ] || abort "Cannot unmount $mounted. Release it in TWRP. No writes performed."
 done
 
 ui_print "Updating GPT from verified layout: expanded userdata, no entry gaps."
