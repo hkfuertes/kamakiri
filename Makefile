@@ -1,7 +1,17 @@
-# Flashable zip that only updates the lk-payload on mmcblk0boot0.
-# Full dist (TWRP, preloader, tz, ...) is still built by makedist.sh.
+# Flashable zips.
+# - full-zip: the original master zip (TWRP, boot patch, preloader, payload, tz)
+#   built by makedist.sh from dist/full. Needs bin/ artifacts and brom-payload
+#   built beforehand.
+# - lk-payload-zip: only updates the lk-payload on mmcblk0boot0.
+# Note: makedist.sh wipes dist/, so build one zip or the other per run.
 
 LK_ZIP = dist/kamakiri-lk-payload.zip
+
+.PHONY: full-zip
+full-zip:
+	./makedist.sh
+	cd dist/full && zip -qr -X ../kamakiri-full.zip META-INF kamakiri
+	@echo "dist/kamakiri-full.zip"
 
 .PHONY: lk-payload-zip
 lk-payload-zip: $(LK_ZIP)
