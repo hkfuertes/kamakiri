@@ -58,6 +58,7 @@ def check_zip(directory, archive):
         info = z.getinfo("META-INF/com/google/android/update-binary")
         assert (info.external_attr >> 16) & 0o111, "Installer is not executable"
         installer = z.read(info.filename).decode()
+        checked = "CHECK_HASH=1" in installer
         assert "__" not in installer, "Unfilled installer hash placeholders"
         assert "hash()" not in installer, "hash conflicts with mksh\'s predefined alias"
 
@@ -167,11 +168,21 @@ command -p dd "$@"
             f.seek(512)
             f.write(b"BAD GPT!")
         corrupt = snapshot()
-        result = run()
-        assert result.returncode != 0 and "Unknown/corrupt primary" in result.stdout, result.stdout + result.stderr
-        assert snapshot() == corrupt, "Installer wrote over an unknown GPT"
+        if checked:
+            result = run()
+            assert result.returncode != 0 and "Unknown/corrupt primary" in result.stdout, result.stdout + result.stderr
+            assert snapshot() == corrupt, "Installer wrote over an unknown GPT"
+        else:
+            result = run()
+            assert result.returncode == 0, result.stdout + result.stderr
+            flashed = snapshot()
+            assert flashed[:2] == ((directory / "gpt-primary.bin").read_bytes(), (directory / "gpt-backup.bin").read_bytes())
+            assert flashed[2] == before[2], "Installer wrote partition contents"
         with disk.open("r+b") as f:
             f.write(old_primary)
+            f.seek(15273567 * 512)
+            f.write(old_backup)
+        assert snapshot() == before
         result = run({"FAIL_GPT_WRITE": "1"})
         assert result.returncode != 0 and "Backup GPT write failed" in result.stdout, result.stdout + result.stderr
         assert snapshot() == before, "Primary GPT changed after backup write failure"
@@ -187,7 +198,8 @@ command -p dd "$@"
         result = run()
         assert result.returncode == 0 and "already updated" in result.stdout
         assert snapshot() == after
-    print("PASS: ZIP installer guards, backup-write failure, both-copy update, unchanged LK, idempotence (host simulation)")
+    print("PASS: ZIP installer guards, backup-write failure, both-copy update, unchanged LK, idempotence"
+          + (" (hash-guard)" if checked else " (no hash guard)") + " (host simulation)")
 
 
 def check_definition(directory, primary):

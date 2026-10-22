@@ -12,6 +12,8 @@ sheldon-gpt-openwrt-rootfs.zip:
   Entries are consecutive. Labels and retained GUIDs are preserved. Both
   GPT copies, stock originals and layout definitions are included.
   Restoring GPT does not restore data.
+  The -nocheck variant (makedist default) omits the current-GPT hash
+  guard: it flashes from any table state; geometry checks remain.
 
 BACK UP YOUR DATA. The installer unmounts Vendor, System, Cache and Data by
 itself and aborts without writing if a mount cannot be released. Install

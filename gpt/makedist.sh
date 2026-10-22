@@ -7,11 +7,16 @@ cd "$(dirname "$0")"
 
 # Single rootfs layout: cache removed; vendor and every other partition
 # keep their position and size. rootfs replaces system+userdata.
+# Default build omits the current-GPT hash guard (flashes from any table
+# state); --check-hash restores it (pinned original/new tables only).
+CHECK_HASH=0
+if [ "${1:-}" = "--check-hash" ]; then CHECK_HASH=1; shift; fi
 INPUT=${1:-bin/gpt-openwrt}
 
 python3 test_gpt.py "$INPUT"
 
 NAME=sheldon-gpt-openwrt-rootfs
+[ "$CHECK_HASH" = 1 ] || NAME=$NAME-nocheck
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/META-INF/com/google/android" "$STAGE/gpt" dist
@@ -20,7 +25,8 @@ for file in gpt-primary.bin gpt-backup.bin original-primary.bin original-backup.
 done
 cp README.txt "$STAGE/gpt/"
 sha() { sha256sum "$INPUT/$1" | cut -d' ' -f1; }
-sed -e "s/__PRIMARY_SHA256__/$(sha gpt-primary.bin)/g" \
+sed -e "s/__CHECK_HASH__/$CHECK_HASH/" \
+    -e "s/__PRIMARY_SHA256__/$(sha gpt-primary.bin)/g" \
     -e "s/__BACKUP_SHA256__/$(sha gpt-backup.bin)/g" \
     -e "s/__ORIGINAL_PRIMARY_SHA256__/$(sha original-primary.bin)/g" \
     -e "s/__ORIGINAL_BACKUP_SHA256__/$(sha original-backup.bin)/g" \

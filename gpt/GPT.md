@@ -55,9 +55,13 @@ All commands run from this `gpt/` directory. The files land in
 
 ## Packaging and flashing
 
-`./makedist.sh [INPUT_DIR]` validates the input with
+`./makedist.sh [--check-hash] [INPUT_DIR]` validates the input with
 `test_gpt.py`, stages the data, fills the SHA256 guards in the installer,
-zips and re-validates. Output: `dist/sheldon-gpt-openwrt-rootfs.zip`.
+zips and re-validates. By default the installer does NOT pin the device's
+current GPT to the original/new tables (it flashes from any table state);
+`--check-hash` restores that guard. Output:
+`dist/sheldon-gpt-openwrt-rootfs-nocheck.zip` (default) or
+`dist/sheldon-gpt-openwrt-rootfs.zip` (`--check-hash`).
 It installs no LK, preloader or partition images; it does not run the full
 kamakiri installer. It checks device, geometry, file hashes and both
 current tables; it writes the backup first, verifies the readback, then

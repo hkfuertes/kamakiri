@@ -9,6 +9,7 @@ PRIMARY_SHA=__PRIMARY_SHA256__
 BACKUP_SHA=__BACKUP_SHA256__
 ORIGINAL_PRIMARY_SHA=__ORIGINAL_PRIMARY_SHA256__
 ORIGINAL_BACKUP_SHA=__ORIGINAL_BACKUP_SHA256__
+CHECK_HASH=__CHECK_HASH__
 
 ui_print() { printf 'ui_print %s\nui_print\n' "$*" > "/proc/self/fd/$OUTFD"; }
 abort() { ui_print "! $*"; exit 1; }
@@ -38,17 +39,23 @@ unzip -o "$ZIP" gpt/gpt-primary.bin gpt/gpt-backup.bin -d "$TMP" >/dev/null || a
 
 toybox dd if="$DEV" of="$TMP/current-primary.bin" bs=512 count=34 2>/dev/null || abort "Cannot read primary GPT."
 toybox dd if="$DEV" of="$TMP/current-backup.bin" bs=512 skip=15273567 count=33 2>/dev/null || abort "Cannot read backup GPT."
-primary=$(file_sha256 "$TMP/current-primary.bin")
-backup=$(file_sha256 "$TMP/current-backup.bin")
-case "$primary" in
-    "$ORIGINAL_PRIMARY_SHA"|"$PRIMARY_SHA") ;;
-    *) abort "Unknown/corrupt primary GPT. No writes performed." ;;
-esac
-case "$backup" in
-    "$ORIGINAL_BACKUP_SHA"|"$BACKUP_SHA") ;;
-    *) abort "Unknown/corrupt backup GPT. No writes performed." ;;
-esac
-if [ "$primary" = "$PRIMARY_SHA" ] && [ "$backup" = "$BACKUP_SHA" ]; then
+# CHECK_HASH is filled at build time: 1 verifies the current GPT against
+# the pinned original/new tables; 0 accepts any current table (cmp still
+# gives idempotence).
+if [ "$CHECK_HASH" = 1 ]; then
+    primary=$(file_sha256 "$TMP/current-primary.bin")
+    backup=$(file_sha256 "$TMP/current-backup.bin")
+    case "$primary" in
+        "$ORIGINAL_PRIMARY_SHA"|"$PRIMARY_SHA") ;;
+        *) abort "Unknown/corrupt primary GPT. No writes performed." ;;
+    esac
+    case "$backup" in
+        "$ORIGINAL_BACKUP_SHA"|"$BACKUP_SHA") ;;
+        *) abort "Unknown/corrupt backup GPT. No writes performed." ;;
+    esac
+fi
+if cmp -s "$TMP/current-primary.bin" "$TMP/gpt/gpt-primary.bin" \
+    && cmp -s "$TMP/current-backup.bin" "$TMP/gpt/gpt-backup.bin"; then
     ui_print "GPT already updated."
     exit 0
 fi
