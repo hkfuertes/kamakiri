@@ -190,19 +190,19 @@ command -p dd "$@"
     print("PASS: ZIP installer guards, backup-write failure, both-copy update, unchanged LK, idempotence (host simulation)")
 
 
-def check_definition(directory, primary, system_size):
+def check_definition(directory, primary):
     # Exercise the actual generator's GUID expansion, not a second template.
     source = Path(__file__).with_name("make-gpt.sh").read_text()
     helpers = source[source.index("guid() {"):source.index("\n# A sparse")]
     rendered = subprocess.run(
-        ["sh", "-c", 'OUT=$1\n' + helpers + '\ndefinition "$2"\n',
-         "generator-check", str(directory.resolve()), str(system_size // 2048)],
+        ["sh", "-c", 'OUT=$1\n' + helpers + '\ndefinition\n',
+         "generator-check", str(directory.resolve())],
         check=True, capture_output=True, text=True,
     ).stdout
     disk_guid = str(uuid.UUID(bytes_le=primary[568:584]))
     assert "label-id: " + disk_guid in rendered.lower()
     rows = [line for line in rendered.splitlines() if line.startswith("start=")]
-    assert len(rows) == 12
+    assert len(rows) == 11
     assert 'name="vendor"' in (directory / "layout.sfdisk").read_text()
     for i, row in enumerate(rows):
         fields = dict(field.strip().split("=", 1) for field in row.split(","))
@@ -230,22 +230,17 @@ def main():
     }
     without_vendor = not any(name == "vendor" for _, _, _, name in parts)
     assert not without_vendor, "vendor must be retained"
-    system_number = 11
-    system_start = 409600
-    system_size = next(end - start + 1 for start, end, _, name in parts if name == "system")
-    assert system_size > 0 and system_size % 2048 == 0
-    userdata_start = system_start + system_size
+    rootfs_number = 11
+    rootfs_start = 409600
+    rootfs_end = 15273566
     expected = bytearray(len(old_table))
-    preserved = system_number - 1
+    preserved = rootfs_number - 1
     expected[:preserved * 128] = old_table[:preserved * 128]
-    for name, start, end, number in (
-        ("system", system_start, userdata_start - 1, system_number),
-        ("userdata", userdata_start, 15273566, system_number + 1),
-    ):
-        old_number = next(n for _, _, n, label in old_parts if label == name)
-        entry = bytearray(old_table[(old_number - 1) * 128:old_number * 128])
-        struct.pack_into("<QQ", entry, 32, start, end)
-        expected[(number - 1) * 128:number * 128] = entry
+    old_number = next(n for _, _, n, label in old_parts if label == "system")
+    entry = bytearray(old_table[(old_number - 1) * 128:old_number * 128])
+    struct.pack_into("<QQ", entry, 32, rootfs_start, rootfs_end)
+    entry[56:128] = "rootfs".encode("utf-16le").ljust(72, b"\0")
+    expected[(rootfs_number - 1) * 128:rootfs_number * 128] = entry
     assert table == expected, "Unexpected change to partition entries/GUIDs"
     assert primary[:512] == original[:512], "MBR changed"
     for old, new in zip(old_headers, headers):
@@ -253,14 +248,12 @@ def main():
         for offset in (16, 88):
             old[offset:offset + 4] = new[offset:offset + 4] = bytes(4)
         assert old == new, "Unexpected GPT header change"
-    assert len(old_parts) in (11, 12, 13) and len(parts) == 12
+    assert len(old_parts) in (11, 12, 13) and len(parts) == 11
     assert [number for _, _, number, _ in parts] == list(range(1, len(parts) + 1)), "GPT entry gaps"
-    assert (system_start, userdata_start - 1, system_number, "system") in parts
-    assert (userdata_start, 15273566, system_number + 1, "userdata") in parts
-    print(f"PASS: system={system_size / 2048:g} MiB (p{system_number}), "
-          f"userdata={(15273567 - userdata_start) / 2048:.3f} MiB (p{system_number + 1}), no entry gaps")
+    assert (rootfs_start, rootfs_end, rootfs_number, "rootfs") in parts
+    print(f"PASS: rootfs={(rootfs_end - rootfs_start + 1) / 2048:.3f} MiB (p{rootfs_number}), no entry gaps")
     print("PASS: both GPT CRCs, no overlaps, unchanged MBR/other partitions/GUIDs")
-    check_definition(directory, primary, system_size)
+    check_definition(directory, primary)
     if len(sys.argv) > 2:
         check_zip(directory, sys.argv[2])
 

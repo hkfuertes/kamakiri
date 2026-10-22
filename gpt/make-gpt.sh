@@ -1,19 +1,12 @@
 #!/bin/sh
 # Run on Sheldon/OpenWrt: sh make-gpt.sh /tmp/gpt-openwrt
-# Optional first argument: system partition size in MiB (default 64).
 # One layout: cache removed; vendor and every other partition keep their
-# position, size and GUID; userdata extends to the last LBA.
-# Generates files only. Never writes the eMMC or formats userdata.
+# position, size and GUID; a single rootfs replaces system+userdata,
+# spanning LBA 409600 to the last usable LBA.
+# Generates files only. Never writes the eMMC or formats rootfs.
 set -eu
 
-SYSTEM_MIB=64
-case "${1:-}" in
-    '') ;;
-    *[!0-9]*) ;;
-    *) SYSTEM_MIB=$1; shift ;;
-esac
-[ "$#" -eq 1 ] || { echo "usage: sh $0 [SYSTEM_MIB] NEW_OUTPUT_DIRECTORY" >&2; exit 1; }
-[ "$SYSTEM_MIB" -gt 0 ] || { echo "system size must be a positive MiB count" >&2; exit 1; }
+[ "$#" -eq 1 ] || { echo "usage: sh $0 NEW_OUTPUT_DIRECTORY" >&2; exit 1; }
 command -v sfdisk >/dev/null
 OUT=$1
 DEV=/dev/mmcblk0
@@ -50,10 +43,6 @@ guid() {
 DISK_GUID=$(awk '/^label-id:/ {print $2}' "$OUT/original.sfdisk")
 
 definition() {
-    SYSTEM_START=409600
-    SYSTEM_SIZE=$(( ${1:-$SYSTEM_MIB} * 2048 ))
-    USERDATA_START=$((SYSTEM_START + SYSTEM_SIZE))
-    USERDATA_SIZE=$((15273567 - USERDATA_START))
     cat <<GPT
 label: gpt
 label-id: ${DISK_GUID:-INVALID}
@@ -72,8 +61,7 @@ start=96256, size=2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid k
 start=98304, size=2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid dkb), name="dkb"
 start=100352, size=2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid MISC), name="MISC"
 start=102400, size=307200, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid vendor), name="vendor"
-start=$SYSTEM_START, size=$SYSTEM_SIZE, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid system), name="system"
-start=$USERDATA_START, size=$USERDATA_SIZE, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid userdata), name="userdata"
+start=409600, size=$((15273567 - 409600)), type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid system), name="rootfs"
 GPT
 }
 
@@ -91,6 +79,6 @@ dd if="$IMAGE" of="$OUT/gpt-backup.bin" bs=512 skip=$((SECTORS - 33)) count=33
 
 printf '\nGenerated: %s/gpt-primary.bin (LBA 0, 34 sectors)\n' "$OUT"
 printf 'Generated: %s/gpt-backup.bin (LBA %s, 33 sectors)\n' "$OUT" "$((SECTORS - 33))"
-printf 'system: %s MiB (p11); vendor: retained; cache: removed; userdata: %s MiB (p12); no entry gaps\n' \
-    "$SYSTEM_MIB" "$(( (15273567 - 409600 - SYSTEM_MIB * 2048) / 2048 ))"
+printf 'rootfs: %s MiB (p11, replaces system+userdata); vendor: retained; cache: removed; no entry gaps\n' \
+    "$(( (15273567 - 409600) / 2048 ))"
 printf 'No eMMC writes or filesystem changes performed.\n'

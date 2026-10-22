@@ -6,15 +6,12 @@ installer. Generating the files never modifies the eMMC.
 
 ## Layout
 
-One parameterized layout:
+One layout:
 
 - `cache` is **removed**.
 - `vendor` and every other partition keep their position, size and GUID.
-- `system` is p11, starting at LBA 409600, sized `SYSTEM_MIB` MiB
-  (**default 64**; the only parameter, in both the generator and the
-  packager).
-- `userdata` is p12, from the end of system to the last usable LBA
-  (7193.796 MiB at the default 64 MiB).
+- a single `rootfs` is p11, from LBA 409600 to the last usable LBA
+  (7257.796 MiB); it replaces `system` and `userdata`.
 
 Entries are consecutive, no gaps. Labels and GUIDs are preserved; mounts
 must use labels, not partition numbers.
@@ -37,13 +34,12 @@ pinned to the GPT read from this stick and to its 15273600-sector /
 and takes the GUIDs from the original dump. Binaries and installers are
 pinned to the GUID profile used to build them; after restoring another
 GPT, regenerate the files and review the hashes. It builds a GPT **from
-scratch**, with a complete 12-partition definition, over an empty sparse
+scratch**, with a complete 11-partition definition, over an empty sparse
 file: it does not resize or reorder a previous table. It keeps the
 original MBR, never writes the eMMC and requires a fresh output directory:
 
 ```sh
 ssh root@192.168.1.1 'sh -s -- /tmp/gpt-openwrt' < make-gpt.sh
-# ...or with an explicit system size: 'sh -s -- 128 /tmp/gpt-openwrt'
 mkdir -p bin
 scp -O -r root@192.168.1.1:/tmp/gpt-openwrt bin/
 ./makedist.sh
@@ -59,10 +55,9 @@ All commands run from this `gpt/` directory. The files land in
 
 ## Packaging and flashing
 
-`./makedist.sh [SYSTEM_MIB] [INPUT_DIR]` validates the input with
-`test_gpt.py`, refuses if the directory's system size does not match
-`SYSTEM_MIB`, stages the data, fills the SHA256 guards in the installer,
-zips and re-validates. Output: `dist/sheldon-gpt-openwrt-<SYSTEM_MIB>.zip`.
+`./makedist.sh [INPUT_DIR]` validates the input with
+`test_gpt.py`, stages the data, fills the SHA256 guards in the installer,
+zips and re-validates. Output: `dist/sheldon-gpt-openwrt-rootfs.zip`.
 It installs no LK, preloader or partition images; it does not run the full
 kamakiri installer. It checks device, geometry, file hashes and both
 current tables; it writes the backup first, verifies the readback, then
@@ -73,21 +68,16 @@ partitions mounted and never formats. TWRP extracts exact entry names
 
 **In TWRP:** the installer unmounts System, Cache, Vendor and Data itself
 and aborts without writing if a mount cannot be released; use USB or ADB
-sideload if the zip was stored on Data. After flashing, **reboot recovery before
-wiping or recreating `userdata`**: the kernel may still be using the old
-map. Coming from stock, its boot changes too: changing the GPT does not
-move its ext4. The user recreates it; check its mount/label and sysupgrade
-compatibility. The previous ROM observed over UART contains
-`sheldon-overlay-init`, which rejects the new geometry with
-`Stock geometry mismatch`. That initializer must also be adapted to the
-`userdata` layout/label; generating or flashing another GPT does not
-remove that check.
+sideload if the zip was stored on Data. After flashing, **reboot recovery
+before formatting or writing `rootfs`**: the kernel may still be using the
+old map. The stock `userdata` ext4 still sits inside the new rootfs
+extent; writing the rootfs image replaces it.
 
 Reproducible host-side check, including a simulation of the installer over
 a sparse file (no real devices):
 
 ```sh
-python3 test_gpt.py bin/gpt-openwrt dist/sheldon-gpt-openwrt-64.zip
+python3 test_gpt.py bin/gpt-openwrt dist/sheldon-gpt-openwrt-rootfs.zip
 ```
 
 ## Manual flashing with `dd`
@@ -145,8 +135,8 @@ cmp gpt-primary.bin check-primary.bin
 ```
 
 The target is **the whole eMMC disk**, never `mmcblk0boot0` or a
-`mmcblk0pN` partition. Afterwards, **reboot recovery before recreating
-`userdata`**. No filesystem is formatted or moved by these commands.
+`mmcblk0pN` partition. Afterwards, **reboot recovery before writing the
+rootfs image**. No filesystem is formatted or moved by these commands.
 
 Going back to Android will require restoring the GPT and the Android
 images, plus Kamakiri: reinstalling Kamakiri alone does not rebuild the
@@ -154,8 +144,8 @@ deleted data.
 
 ## Relation to the ARM64 payload
 
-The GPT zip is independent: `dist/sheldon-gpt-openwrt-64.zip` (TWRP). If
+The GPT zip is independent: `dist/sheldon-gpt-openwrt-rootfs.zip` (TWRP). If
 you use both, update the payload first, then the GPT, and **reboot recovery
-before recreating userdata**.
+before writing the rootfs**.
 
 The payload update is documented in [../ARM64.md](../ARM64.md).
