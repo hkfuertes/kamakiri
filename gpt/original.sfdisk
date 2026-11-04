@@ -1,0 +1,21 @@
+label: gpt
+label-id: 51108CDD-908D-44BE-90D4-215355DE78CF
+device: /tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img
+unit: sectors
+first-lba: 34
+last-lba: 15273566
+sector-size: 512
+
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img1 : start=        1024, size=        2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=2DE45FA4-EE7B-44FB-81AA-39B62E5D3B84, name="lk"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img2 : start=        3072, size=       10240, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=498BF3E9-3A8E-4FB4-9E3F-DCE629AE8C97, name="tee1"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img3 : start=       13312, size=       10240, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=87AC02D2-5074-417E-A23A-CC3E21B01270, name="tee2"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img4 : start=       23552, size=       32768, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=9FD0330D-E72B-474A-B9AE-F3C4A61F79B3, name="boot"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img5 : start=       56320, size=       32768, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=83BFA640-2416-44B1-BCDF-C68D8D738063, name="recovery"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img6 : start=       89088, size=        7168, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=BBEEC17D-EF28-44E5-9590-255C5B236072, name="logo"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img7 : start=       96256, size=        2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=096A1801-CE36-4E9C-8567-587173CAADF7, name="kb"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img8 : start=       98304, size=        2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=2F363904-FAC2-48B8-8504-F39BEE1B410F, name="dkb"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img9 : start=      100352, size=        2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=E94B32CE-C1AD-44A6-8AD5-DCB5D404DF17, name="MISC"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img10 : start=      102400, size=      307200, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=7597D076-9235-46E5-9332-BE317A2A364E, name="vendor"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img11 : start=      409600, size=     3072000, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=E14DC158-EEE4-4444-91F8-1F28D52CD071, name="system"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img12 : start=     3481600, size=     1048576, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=C014D00B-9A30-462C-9D4B-3FF9EDE4283E, name="cache"
+/tmp/.ctx-mode-wP0L1K/tmpt3sny0dg/source.img13 : start=     4530176, size=    10743391, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=46F7CBE4-396B-4F6B-AAA3-91E6282E7652, name="userdata"

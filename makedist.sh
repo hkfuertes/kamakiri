@@ -2,6 +2,7 @@
 
 # Flashable zip that only updates the lk-payload; the default flow below
 # stays the original (stages dist/full from local bin/ blobs).
+# The OpenWrt GPT project lives in gpt/ with its own makedist.sh.
 if [ "$1" = "--payload-only-zip" ]; then
     rm -rf dist/lkzip dist/kamakiri-lk-payload.zip
     make -C lk-payload
