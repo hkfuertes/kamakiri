@@ -10,8 +10,9 @@ One layout:
 
 - `cache` is **removed**.
 - `vendor` and every other partition keep their position, size and GUID.
-- a single `rootfs` is p11, from LBA 409600 to the last usable LBA
-  (7257.796 MiB); it replaces `system` and `userdata`.
+- a single `system` is p11, from LBA 409600 to the last usable LBA
+  (7257.796 MiB); it replaces the old `system` and `userdata`.
+  The name `system` is required by LK; do not rename it to `rootfs`.
 
 Entries are consecutive, no gaps. Labels and GUIDs are preserved; mounts
 must use labels, not partition numbers.
@@ -19,7 +20,7 @@ must use labels, not partition numbers.
 The OTA `vendor` partition contains Android HAL/libraries, Android kernel
 modules and firmware, including `WIFI_RAM_CODE_MT7663.bin`,
 `mt7663_patch_e2_hdr.bin` and `EEPROM_MT7663.bin`. It stays intact; if a
-mainline driver ever needs one of those blobs, package it in the rootfs.
+mainline driver ever needs one of those blobs, package it in the system.
 
 Step keeps the current dependencies: `lk`, `boot`, `recovery` and `MISC`
 are looked up by name among the first 16 GPT entries, 128 bytes each from
@@ -60,8 +61,8 @@ All commands run from this `gpt/` directory. The files land in
 zips and re-validates. By default the installer does NOT pin the device's
 current GPT to the original/new tables (it flashes from any table state);
 `--check-hash` restores that guard. Output:
-`dist/sheldon-gpt-openwrt-rootfs-nocheck.zip` (default) or
-`dist/sheldon-gpt-openwrt-rootfs.zip` (`--check-hash`).
+`dist/sheldon-gpt-openwrt-system-nocheck.zip` (default) or
+`dist/sheldon-gpt-openwrt-system.zip` (`--check-hash`).
 It installs no LK, preloader or partition images; it does not run the full
 kamakiri installer. It checks device, geometry, file hashes and both
 current tables; it writes the backup first, verifies the readback, then
@@ -73,15 +74,15 @@ partitions mounted and never formats. TWRP extracts exact entry names
 **In TWRP:** the installer unmounts System, Cache, Vendor and Data itself
 and aborts without writing if a mount cannot be released; use USB or ADB
 sideload if the zip was stored on Data. After flashing, **reboot recovery
-before formatting or writing `rootfs`**: the kernel may still be using the
-old map. The stock `userdata` ext4 still sits inside the new rootfs
-extent; writing the rootfs image replaces it.
+before formatting or writing `system`**: the kernel may still be using the
+old map. The stock `userdata` ext4 still sits inside the new system
+extent; writing the system image replaces it.
 
 Reproducible host-side check, including a simulation of the installer over
 a sparse file (no real devices):
 
 ```sh
-python3 test_gpt.py bin/gpt-openwrt dist/sheldon-gpt-openwrt-rootfs.zip
+python3 test_gpt.py bin/gpt-openwrt dist/sheldon-gpt-openwrt-system.zip
 ```
 
 ## Manual flashing with `dd`
@@ -140,7 +141,7 @@ cmp gpt-primary.bin check-primary.bin
 
 The target is **the whole eMMC disk**, never `mmcblk0boot0` or a
 `mmcblk0pN` partition. Afterwards, **reboot recovery before writing the
-rootfs image**. No filesystem is formatted or moved by these commands.
+system image**. No filesystem is formatted or moved by these commands.
 
 Going back to Android will require restoring the GPT and the Android
 images, plus Kamakiri: reinstalling Kamakiri alone does not rebuild the
@@ -148,8 +149,8 @@ deleted data.
 
 ## Relation to the ARM64 payload
 
-The GPT zip is independent: `dist/sheldon-gpt-openwrt-rootfs.zip` (TWRP). If
+The GPT zip is independent: `dist/sheldon-gpt-openwrt-system.zip` (TWRP). If
 you use both, update the payload first, then the GPT, and **reboot recovery
-before writing the rootfs**.
+before writing the system**.
 
 The payload update is documented in [../ARM64.md](../ARM64.md).

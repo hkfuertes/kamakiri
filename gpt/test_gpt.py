@@ -242,17 +242,17 @@ def main():
     }
     without_vendor = not any(name == "vendor" for _, _, _, name in parts)
     assert not without_vendor, "vendor must be retained"
-    rootfs_number = 11
-    rootfs_start = 409600
-    rootfs_end = 15273566
+    system_number = 11
+    system_start = 409600
+    system_end = 15273566
     expected = bytearray(len(old_table))
-    preserved = rootfs_number - 1
+    preserved = system_number - 1
     expected[:preserved * 128] = old_table[:preserved * 128]
     old_number = next(n for _, _, n, label in old_parts if label == "system")
     entry = bytearray(old_table[(old_number - 1) * 128:old_number * 128])
-    struct.pack_into("<QQ", entry, 32, rootfs_start, rootfs_end)
-    entry[56:128] = "rootfs".encode("utf-16le").ljust(72, b"\0")
-    expected[(rootfs_number - 1) * 128:rootfs_number * 128] = entry
+    struct.pack_into("<QQ", entry, 32, system_start, system_end)
+    entry[56:128] = "system".encode("utf-16le").ljust(72, b"\0")
+    expected[(system_number - 1) * 128:system_number * 128] = entry
     assert table == expected, "Unexpected change to partition entries/GUIDs"
     assert primary[:512] == original[:512], "MBR changed"
     for old, new in zip(old_headers, headers):
@@ -262,8 +262,8 @@ def main():
         assert old == new, "Unexpected GPT header change"
     assert len(old_parts) in (11, 12, 13) and len(parts) == 11
     assert [number for _, _, number, _ in parts] == list(range(1, len(parts) + 1)), "GPT entry gaps"
-    assert (rootfs_start, rootfs_end, rootfs_number, "rootfs") in parts
-    print(f"PASS: rootfs={(rootfs_end - rootfs_start + 1) / 2048:.3f} MiB (p{rootfs_number}), no entry gaps")
+    assert (system_start, system_end, system_number, "system") in parts
+    print(f"PASS: system={(system_end - system_start + 1) / 2048:.3f} MiB (p{system_number}), no entry gaps")
     print("PASS: both GPT CRCs, no overlaps, unchanged MBR/other partitions/GUIDs")
     check_definition(directory, primary)
     if len(sys.argv) > 2:

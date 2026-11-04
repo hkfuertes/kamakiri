@@ -1,4 +1,4 @@
-Sheldon OpenWrt GPT: cache removed, vendor retained, a single rootfs
+Sheldon OpenWrt GPT: cache removed, vendor retained, a single system
 partition (p11) replaces system+userdata; see GPT.md and layout.sfdisk.
 
 The ZIP installs from TWRP. It does not install Kamakiri or write boot0.
@@ -6,8 +6,8 @@ Only the verified 15273600-sector Sheldon/Sheldonp eMMC is supported.
 Pinned to the source dump GUIDs; rebuild/review hashes after restoring
 another GPT.
 
-sheldon-gpt-openwrt-rootfs.zip:
-  p1..p10 unchanged, vendor retained, rootfs=p11 from LBA 409600 to the
+sheldon-gpt-openwrt-system.zip:
+  p1..p10 unchanged, vendor retained, system=p11 from LBA 409600 to the
   last LBA (7257.796 MiB).
   Entries are consecutive. Labels and retained GUIDs are preserved. Both
   GPT copies, stock originals and layout definitions are included.
@@ -23,9 +23,9 @@ entries and Toybox dd avoid the stock TWRP unzip/32-bit-offset/disabled-
 conv problems. Nothing is formatted or moved.
 
 REBOOT RECOVERY after flashing, BEFORE formatting or writing partition
-images. Then format rootfs and flash the OpenWrt image into it. Use
+images. Then format system and flash the OpenWrt image into it. Use
 labels, not partition numbers/UUID assumptions.
 Do not apply from installed OpenWrt while /rom or /overlay is mounted.
 
 Independent of kamakiri-lk-payload.zip. Neither component contains U-Boot,
-a new Linux kernel/rootfs or a full bootloader installation.
+a new Linux kernel/system or a full bootloader installation.

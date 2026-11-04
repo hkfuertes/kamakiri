@@ -1,9 +1,9 @@
 #!/bin/sh
 # Run on Sheldon/OpenWrt: sh make-gpt.sh /tmp/gpt-openwrt
 # One layout: cache removed; vendor and every other partition keep their
-# position, size and GUID; a single rootfs replaces system+userdata,
+# position, size and GUID; a single system replaces system+userdata,
 # spanning LBA 409600 to the last usable LBA.
-# Generates files only. Never writes the eMMC or formats rootfs.
+# Generates files only. Never writes the eMMC or formats system.
 set -eu
 
 [ "$#" -eq 1 ] || { echo "usage: sh $0 NEW_OUTPUT_DIRECTORY" >&2; exit 1; }
@@ -61,7 +61,7 @@ start=96256, size=2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid k
 start=98304, size=2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid dkb), name="dkb"
 start=100352, size=2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid MISC), name="MISC"
 start=102400, size=307200, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid vendor), name="vendor"
-start=409600, size=$((15273567 - 409600)), type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid system), name="rootfs"
+start=409600, size=$((15273567 - 409600)), type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid system), name="system"
 GPT
 }
 
@@ -79,6 +79,6 @@ dd if="$IMAGE" of="$OUT/gpt-backup.bin" bs=512 skip=$((SECTORS - 33)) count=33
 
 printf '\nGenerated: %s/gpt-primary.bin (LBA 0, 34 sectors)\n' "$OUT"
 printf 'Generated: %s/gpt-backup.bin (LBA %s, 33 sectors)\n' "$OUT" "$((SECTORS - 33))"
-printf 'rootfs: %s MiB (p11, replaces system+userdata); vendor: retained; cache: removed; no entry gaps\n' \
+printf 'system: %s MiB (p11, replaces system+userdata); vendor: retained; cache: removed; no entry gaps\n' \
     "$(( (15273567 - 409600) / 2048 ))"
 printf 'No eMMC writes or filesystem changes performed.\n'

@@ -5,8 +5,8 @@
 set -e
 cd "$(dirname "$0")"
 
-# Single rootfs layout: cache removed; vendor and every other partition
-# keep their position and size. rootfs replaces system+userdata.
+# Single system layout: cache removed; vendor and every other partition
+# keep their position and size. system replaces system+userdata.
 # Default build omits the current-GPT hash guard (flashes from any table
 # state); --check-hash restores it (pinned original/new tables only).
 CHECK_HASH=0
@@ -15,7 +15,7 @@ INPUT=${1:-bin/gpt-openwrt}
 
 python3 test_gpt.py "$INPUT"
 
-NAME=sheldon-gpt-openwrt-rootfs
+NAME=sheldon-gpt-openwrt-system
 [ "$CHECK_HASH" = 1 ] || NAME=$NAME-nocheck
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
@@ -33,7 +33,17 @@ sed -e "s/__CHECK_HASH__/$CHECK_HASH/" \
     META-INF/com/google/android/update-binary > "$STAGE/META-INF/com/google/android/update-binary"
 chmod 755 "$STAGE/META-INF/com/google/android/update-binary"
 cp META-INF/com/google/android/updater-script "$STAGE/META-INF/com/google/android/"
-( cd "$STAGE" && zip -qr "$OLDPWD/dist/$NAME.zip" META-INF gpt )
+python3 - "$STAGE" "dist/$NAME.zip" <<'PY'
+from pathlib import Path
+import sys
+import zipfile
+
+stage = Path(sys.argv[1])
+with zipfile.ZipFile(sys.argv[2], "w", zipfile.ZIP_DEFLATED) as archive:
+    for path in sorted(stage.rglob("*")):
+        if path.is_file():
+            archive.write(path, path.relative_to(stage))
+PY
 rm -rf "$STAGE"; trap - EXIT
 python3 test_gpt.py "$INPUT" "dist/$NAME.zip"
 echo "dist/$NAME.zip ready (GPT only, no filesystems formatted)"
