@@ -9,7 +9,7 @@ installer. Generating the files never modifies the eMMC.
 One layout:
 
 - `cache` is **removed**.
-- `vendor` and every other partition keep their position, size and GUID.
+- p1..p10, including `vendor`, keep their position, size and GUID.
 - a single `system` is p11, from LBA 409600 to the last usable LBA
   (7257.796 MiB); it replaces the old `system` and `userdata`.
   The name `system` is required by LK; do not rename it to `rootfs`.
@@ -43,7 +43,7 @@ original MBR, never writes the eMMC and requires a fresh output directory:
 ssh root@192.168.1.1 'sh -s -- /tmp/gpt-openwrt' < make-gpt.sh
 mkdir -p bin
 scp -O -r root@192.168.1.1:/tmp/gpt-openwrt bin/
-./makedist.sh
+./makedist.sh --check-hash
 ```
 
 All commands run from this `gpt/` directory. The files land in
@@ -64,8 +64,8 @@ current GPT to the original/new tables (it flashes from any table state);
 `dist/sheldon-gpt-openwrt-system-nocheck.zip` (default) or
 `dist/sheldon-gpt-openwrt-system.zip` (`--check-hash`).
 It installs no LK, preloader or partition images; it does not run the full
-kamakiri installer. It checks device, geometry, file hashes and both
-current tables; it writes the backup first, verifies the readback, then
+kamakiri installer. It checks device, geometry and payload hashes, and reads both current
+GPT copies (their hashes are enforced only with `--check-hash`); it writes the backup first, verifies the readback, then
 writes and verifies the primary. It refuses to proceed with affected
 partitions mounted and never formats. TWRP extracts exact entry names
 (its `unzip` does not expand globs) and uses `toybox dd`: the standalone
@@ -75,8 +75,9 @@ partitions mounted and never formats. TWRP extracts exact entry names
 and aborts without writing if a mount cannot be released; use USB or ADB
 sideload if the zip was stored on Data. After flashing, **reboot recovery
 before formatting or writing `system`**: the kernel may still be using the
-old map. The stock `userdata` ext4 still sits inside the new system
-extent; writing the system image replaces it.
+old map. Old filesystem data remains inside the expanded partition until
+those sectors are overwritten. Flashing an image is not a secure erase
+and does not necessarily overwrite all former `userdata` sectors.
 
 Reproducible host-side check, including a simulation of the installer over
 a sparse file (no real devices):
@@ -143,9 +144,36 @@ The target is **the whole eMMC disk**, never `mmcblk0boot0` or a
 `mmcblk0pN` partition. Afterwards, **reboot recovery before writing the
 system image**. No filesystem is formatted or moved by these commands.
 
-Going back to Android will require restoring the GPT and the Android
-images, plus Kamakiri: reinstalling Kamakiri alone does not rebuild the
-deleted data.
+## Original layout and rollback
+
+The versioned `original.sfdisk` records this dongle's layout immediately
+before repartitioning: disk/partition GUIDs, types, labels, starts and sizes.
+Its temporary `device:` paths identify the host sparse file used for the
+dump, not a flashing target. It is not a universal dump for every Sheldon.
+
+This text can reconstruct the partition layout on a correctly sized sparse
+file with `sfdisk`, after adapting the device paths. It does not preserve
+the original MBR bytes or partition contents, so it is not an exact binary
+backup. Binary dumps are generated locally and included in generated ZIPs,
+not committed; the local `.bin` dumps used for our hardware test were
+subsequently deleted. The text alone is not input for `makedist.sh`.
+
+There is **no automated restore mode or tested rollback ZIP**. Restoring
+requires separately prepared and validated original GPT copies. Use TWRP
+or an initramfs with affected partitions unmounted, verify geometry and the
+current layout, write and verify backup first and primary second, then
+reboot recovery before using the restored map. Do not flash the text file
+or pass it directly to `dd`.
+
+Restoring GPT does not restore filesystems or erased data. If the expanded
+`system` has been written/formatted, reinstall the affected Android images
+and recreate data as needed. Kamakiri alone does not recover those contents;
+this GPT installer does not itself change LK, boot or recovery images.
+
+The generator accepts only source tables in its SHA256 allowlist; it is
+not a general converter for arbitrary GPTs. Do not assume it can regenerate
+files from the newly installed layout. Keep the source artifacts needed
+for any rebuild or rollback.
 
 ## Relation to the ARM64 payload
 

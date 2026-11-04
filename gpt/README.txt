@@ -10,22 +10,28 @@ sheldon-gpt-openwrt-system.zip:
   p1..p10 unchanged, vendor retained, system=p11 from LBA 409600 to the
   last LBA (7257.796 MiB).
   Entries are consecutive. Labels and retained GUIDs are preserved. Both
-  GPT copies, stock originals and layout definitions are included.
+  GPT copies, source GPT copies and layout definitions are included in
+  generated ZIPs. Binary dumps are not committed to the repository.
   Restoring GPT does not restore data.
   The -nocheck variant (makedist default) omits the current-GPT hash
   guard: it flashes from any table state; geometry checks remain.
 
 BACK UP YOUR DATA. The installer unmounts Vendor, System, Cache and Data by
 itself and aborts without writing if a mount cannot be released. Install
-from USB or ADB sideload, not Data. The installer checks both current GPT
-copies and writes and verifies backup first, then primary. Exact ZIP
+from USB or ADB sideload, not Data. The installer reads both current GPT
+copies; only --check-hash builds enforce their hashes. It writes and
+verifies backup first, then primary. Exact ZIP
 entries and Toybox dd avoid the stock TWRP unzip/32-bit-offset/disabled-
 conv problems. Nothing is formatted or moved.
 
 REBOOT RECOVERY after flashing, BEFORE formatting or writing partition
-images. Then format system and flash the OpenWrt image into it. Use
-labels, not partition numbers/UUID assumptions.
+images. Follow the OS image's installation instructions; this ZIP neither
+formats nor resizes the filesystem. Use labels, not partition numbers.
 Do not apply from installed OpenWrt while /rom or /overlay is mounted.
 
 Independent of kamakiri-lk-payload.zip. Neither component contains U-Boot,
-a new Linux kernel/system or a full bootloader installation.
+a new Linux kernel/root filesystem or a full bootloader installation.
+
+The repository's original.sfdisk records this dongle's pre-change layout
+and GUIDs. It is not a filesystem backup or an exact binary GPT/MBR backup.
+There is no automated restore mode; see GPT.md.
