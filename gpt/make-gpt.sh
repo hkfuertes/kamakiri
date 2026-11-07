@@ -12,9 +12,9 @@ OUT=$1
 DEV=/dev/mmcblk0
 read -r SECTORS < /sys/class/block/mmcblk0/size
 read -r SECTOR_SIZE < /sys/class/block/mmcblk0/queue/logical_block_size
-[ "$SECTORS" = 15273600 ] && [ "$SECTOR_SIZE" = 512 ] || {
-    echo "Unexpected eMMC geometry; refusing to generate GPT" >&2; exit 1;
-}
+case "$SECTORS:$SECTOR_SIZE" in 15269888:512|15273600:512) ;; *)
+    echo "Unexpected eMMC geometry; refusing to generate GPT" >&2; exit 1 ;;
+esac
 
 mkdir "$OUT" # Refuse to overwrite an existing directory.
 IMAGE=$OUT/disk.img
@@ -25,6 +25,7 @@ dd if="$DEV" of="$OUT/original-primary.bin" bs=512 count=34
 dd if="$DEV" of="$OUT/original-backup.bin" bs=512 skip=$((SECTORS - 33)) count=33
 ACTUAL=$(dd if="$OUT/original-primary.bin" bs=512 skip=2 count=32 | sha256sum | awk '{print $1}')
 case "$ACTUAL" in
+    577d803386baf8ca66d4aa87ee74d0a79239fc95ced521d066b55406a0ec9c52|\
     25aea305a221daf2204d7ca7f0d1af571d4944b272c450cbe36a0e9d99a5d26a|\
     fd41582e245a85b5af06bf2880c144086ad7b0180daf743492ab1a1f08cc0acd|\
     d48e33830e03104aa1e7e5ffa56d04dce459df19b43881b60040a4125fa8f305|\
@@ -48,7 +49,7 @@ label: gpt
 label-id: ${DISK_GUID:-INVALID}
 unit: sectors
 first-lba: 34
-last-lba: 15273566
+last-lba: $((SECTORS - 34))
 sector-size: 512
 
 start=1024, size=2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid lk), name="lk"
@@ -61,7 +62,7 @@ start=96256, size=2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid k
 start=98304, size=2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid dkb), name="dkb"
 start=100352, size=2048, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid MISC), name="MISC"
 start=102400, size=307200, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid vendor), name="vendor"
-start=409600, size=$((15273567 - 409600)), type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid system), name="system"
+start=409600, size=$((SECTORS - 33 - 409600)), type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=$(guid system), name="system"
 GPT
 }
 
@@ -80,5 +81,5 @@ dd if="$IMAGE" of="$OUT/gpt-backup.bin" bs=512 skip=$((SECTORS - 33)) count=33
 printf '\nGenerated: %s/gpt-primary.bin (LBA 0, 34 sectors)\n' "$OUT"
 printf 'Generated: %s/gpt-backup.bin (LBA %s, 33 sectors)\n' "$OUT" "$((SECTORS - 33))"
 printf 'system: %s MiB (p11, replaces system+userdata); vendor: retained; cache: removed; no entry gaps\n' \
-    "$(( (15273567 - 409600) / 2048 ))"
+    "$(( (SECTORS - 33 - 409600) / 2048 ))"
 printf 'No eMMC writes or filesystem changes performed.\n'

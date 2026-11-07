@@ -1,37 +1,25 @@
-Sheldon OpenWrt GPT: cache removed, vendor retained, a single system
-partition (p11) replaces system+userdata; see GPT.md and layout.sfdisk.
+Sheldon GPT: cache removed, vendor retained, single system partition
+(p11) replaces system+userdata. p1..p10, their GUIDs and the MBR retained.
+No filesystem is formatted. The updater does not write LK, boot or boot0.
 
-The ZIP installs from TWRP. It does not install Kamakiri or write boot0.
-Only the verified 15273600-sector Sheldon/Sheldonp eMMC is supported.
-Pinned to the source dump GUIDs; rebuild/review hashes after restoring
-another GPT.
+Supported eMMC: 15269888 or 15273600 sectors, 512 bytes/sector.
+System starts at LBA 409600 and ends at the device's last usable LBA:
+7255.984 MiB on the small eMMC, 7257.796 MiB on the large one.
 
-sheldon-gpt-openwrt-system.zip:
-  p1..p10 unchanged, vendor retained, system=p11 from LBA 409600 to the
-  last LBA (7257.796 MiB).
-  Entries are consecutive. Labels and retained GUIDs are preserved. Both
-  GPT copies, source GPT copies and layout definitions are included in
-  generated ZIPs. Binary dumps are not committed to the repository.
-  Restoring GPT does not restore data.
-  The -nocheck variant (makedist default) omits the current-GPT hash
-  guard: it flashes from any table state; geometry checks remain.
+sheldon-gpt-openwrt-system-<sectors>[-nocheck].zip:
+Prebuilt GPT for ONE specific capacity. --check-hash restricts the current
+GPT to the source dump or the generated table. Default skips that hash
+guard, but still checks product, geometry and mounts. Dumps are included.
 
-BACK UP YOUR DATA. The installer unmounts Vendor, System, Cache and Data by
-itself and aborts without writing if a mount cannot be released. Install
-from USB or ADB sideload, not Data. The installer reads both current GPT
-copies; only --check-hash builds enforce their hashes. It writes and
-verifies backup first, then primary. Exact ZIP
-entries and Toybox dd avoid the stock TWRP unzip/32-bit-offset/disabled-
-conv problems. Nothing is formatted or moved.
+sheldon-gpt-on-device.zip:
+Static ARM32 generator validates both current GPT copies and a verified
+original-13 or generated-11 partition layout, then generates a native-size
+GPT in TWRP. Supports per-device GUIDs, rejects other layouts/capacities.
+Original GPT copies are saved to the printed /tmp/gpt-before.XXXXXX path.
+RAM ONLY: adb pull that directory BEFORE rebooting to retain the backup.
+Host simulation and ARM32/QEMU tested; runtime ZIP not yet hardware-tested.
 
-REBOOT RECOVERY after flashing, BEFORE formatting or writing partition
-images. Follow the OS image's installation instructions; this ZIP neither
-formats nor resizes the filesystem. Use labels, not partition numbers.
-Do not apply from installed OpenWrt while /rom or /overlay is mounted.
-
-Independent of kamakiri-lk-payload.zip. Neither component contains U-Boot,
-a new Linux kernel/root filesystem or a full bootloader installation.
-
-The repository's original.sfdisk records this dongle's pre-change layout
-and GUIDs. It is not a filesystem backup or an exact binary GPT/MBR backup.
-There is no automated restore mode; see GPT.md.
+Install through TWRP from /tmp or USB, not system/data/cache. Keep backups
+of partition contents: restoring GPT alone does NOT restore data. Reboot
+RECOVERY after installation before using or formatting the new partition.
+See GPT.md for build commands, validation and rollback limitations.

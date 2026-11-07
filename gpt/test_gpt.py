@@ -11,6 +11,8 @@ import uuid
 import zipfile
 import zlib
 
+SECTORS = 15273600
+
 
 def check_pair(directory, prefix):
     primary = (directory / f"{prefix}-primary.bin").read_bytes()
@@ -21,8 +23,8 @@ def check_pair(directory, prefix):
     assert table == backup[:-512], "Primary/backup partition arrays differ"
     headers = (primary[512:1024], backup[-512:])
     for header, current, alternate, entries in (
-        (headers[0], 1, 15273599, 2),
-        (headers[1], 15273599, 1, 15273567),
+        (headers[0], 1, SECTORS - 1, 2),
+        (headers[1], SECTORS - 1, 1, SECTORS - 33),
     ):
         assert header[:8] == b"EFI PART"
         size, crc = struct.unpack_from("<II", header, 12)
@@ -30,7 +32,7 @@ def check_pair(directory, prefix):
         check = bytearray(header[:size])
         check[16:20] = bytes(4)
         assert zlib.crc32(check) == crc, "Bad GPT header CRC"
-        assert struct.unpack_from("<QQQQ", header, 24) == (current, alternate, 34, 15273566)
+        assert struct.unpack_from("<QQQQ", header, 24) == (current, alternate, 34, SECTORS - 34)
         assert struct.unpack_from("<QIII", header, 72) == (entries, 128, 128, zlib.crc32(table))
     assert headers[0][56:72] == headers[1][56:72], "Disk GUID mismatch"
     cursor = 34
@@ -40,7 +42,7 @@ def check_pair(directory, prefix):
         if entry[:16] == bytes(16):
             continue
         start, end = struct.unpack_from("<QQ", entry, 32)
-        assert 34 <= start <= end <= 15273566
+        assert 34 <= start <= end <= SECTORS - 34
         partitions.append((start, end, i + 1, entry[56:128].decode("utf-16le").rstrip("\0")))
     for start, end, _, _ in sorted(partitions):
         assert start >= cursor, "Overlapping partitions"
@@ -48,17 +50,20 @@ def check_pair(directory, prefix):
     return primary, headers, table, partitions
 
 
-def check_zip(directory, archive):
+def check_zip(directory, archive, sectors=None):
+    SECTORS = globals()["SECTORS"] if sectors is None else sectors
     without_vendor = 'name="vendor"' not in (directory / "layout.sfdisk").read_text()
     with zipfile.ZipFile(archive) as z:
-        for prefix in ("original", "gpt"):
-            for copy in ("primary", "backup"):
-                name = f"{prefix}-{copy}.bin"
-                assert z.read(f"gpt/{name}") == (directory / name).read_bytes()
         info = z.getinfo("META-INF/com/google/android/update-binary")
         assert (info.external_attr >> 16) & 0o111, "Installer is not executable"
         installer = z.read(info.filename).decode()
         checked = "CHECK_HASH=1" in installer
+        live = "GENERATE=1" in installer.splitlines()
+        if not live:
+            for prefix in ("original", "gpt"):
+                for copy in ("primary", "backup"):
+                    name = f"{prefix}-{copy}.bin"
+                    assert z.read(f"gpt/{name}") == (directory / name).read_bytes()
         assert "__" not in installer, "Unfilled installer hash placeholders"
         assert "hash()" not in installer, "hash conflicts with mksh\'s predefined alias"
 
@@ -72,6 +77,7 @@ def check_zip(directory, archive):
             ("/sys/class/block", str(root / "sys")),
             ("/proc/self/mountinfo", str(root / "mountinfo")),
             ("/tmp/gpt-openwrt.", str(root / "unpack.")),
+            ("/tmp/gpt-before.", str(root / "before.")),
             ('[ -b "$DEV" ]', '[ -f "$DEV" ]'),
         ):
             installer = installer.replace(old, new)
@@ -93,9 +99,10 @@ command -p unzip "$@"
             "toybox": '#!/bin/sh\n[ "$1" = dd ] || exit 1\nshift\nDD_LARGEFILE=1 exec dd "$@"\n',
             "umount": '#!/bin/sh\n[ "${UMOUNT_FAILS:-0}" = 1 ] && exit 1\nawk -v m="$1" \x27$5 != m && index($5, m "/") != 1\x27 "$FAKE_MOUNTINFO" > "$FAKE_MOUNTINFO.new" && mv "$FAKE_MOUNTINFO.new" "$FAKE_MOUNTINFO"\n',
             "dd": '''#!/bin/sh
+printf '%s\\n' "$*" >> "$DD_LOG"
 for arg do
     case "$arg" in
-        skip=15273567|seek=15273567) [ "${DD_LARGEFILE:-0}" = 1 ] || exit 1 ;;
+        skip=15273567|seek=15273567|skip=15269855|seek=15269855) [ "${DD_LARGEFILE:-0}" = 1 ] || exit 1 ;;
     esac
     if [ "${FAIL_GPT_WRITE:-0}" = 1 ] && [ "$arg" = "of=$FAKE_DISK" ]; then exit 1; fi
 done
@@ -106,7 +113,7 @@ command -p dd "$@"
             path.write_text(body)
             path.chmod(0o755)
         for name, value in {
-            "mmcblk0/size": "15273600", "mmcblk0/queue/logical_block_size": "512",
+            "mmcblk0/size": str(SECTORS), "mmcblk0/queue/logical_block_size": "512",
             "mmcblk0p10/dev": "259:2", "mmcblk0p11/dev": "259:3",
             "mmcblk0p12/dev": "259:4", "mmcblk0p13/dev": "259:5",
         }.items():
@@ -117,9 +124,9 @@ command -p dd "$@"
         old_primary = (directory / "original-primary.bin").read_bytes()
         old_backup = (directory / "original-backup.bin").read_bytes()
         with disk.open("wb") as f:
-            f.truncate(15273600 * 512)
+            f.truncate(SECTORS * 512)
             f.write(old_primary)
-            f.seek(15273567 * 512)
+            f.seek((SECTORS - 33) * 512)
             f.write(old_backup)
             f.seek(1024 * 512)
             f.write(b"LK MUST NOT CHANGE")
@@ -127,20 +134,41 @@ command -p dd "$@"
         def snapshot():
             with disk.open("rb") as f:
                 primary = f.read(17408)
-                f.seek(15273567 * 512)
+                f.seek((SECTORS - 33) * 512)
                 backup = f.read(16896)
                 f.seek(1024 * 512)
                 return primary, backup, f.read(18)
 
         def run(extra_env=None):
-            return subprocess.run(
+            (root / "dd.log").write_text("")
+            result = subprocess.run(
                 ["sh", str(script), "3", "1", str(Path(archive).resolve())],
                 env={**os.environ, "PATH": str(tools) + os.pathsep + os.environ["PATH"],
-                     "FAKE_DISK": str(disk), "FAKE_MOUNTINFO": str(root / "mountinfo"), **(extra_env or {})},
+                     "FAKE_DISK": str(disk), "FAKE_MOUNTINFO": str(root / "mountinfo"),
+                     "DD_LOG": str(root / "dd.log"), **(extra_env or {})},
                 capture_output=True, text=True, timeout=30,
             )
+            if (result.returncode != 0 and not (extra_env or {}).get("FAIL_GPT_WRITE")) or "already updated" in result.stdout:
+                assert not any(f"of={disk} " in line for line in (root / "dd.log").read_text().splitlines()), "Unexpected disk write"
+            return result
 
         before = snapshot()
+        if live:
+            original_script = script.read_text()
+            digest_line = next(line for line in original_script.splitlines() if line.startswith("GENERATOR_SHA="))
+            script.write_text(original_script.replace(digest_line, "GENERATOR_SHA=" + "0" * 64))
+            result = run()
+            assert result.returncode != 0 and "Generator hash mismatch" in result.stdout, result.stdout + result.stderr
+            assert snapshot() == before
+            script.write_text(original_script)
+            for node, invalid in (("size", "15273601"), ("queue/logical_block_size", "4096")):
+                path = root / "sys/mmcblk0" / node
+                value = path.read_text()
+                path.write_text(invalid + "\n")
+                result = run()
+                assert result.returncode != 0 and "Unsupported eMMC geometry" in result.stdout, result.stdout + result.stderr
+                assert snapshot() == before
+                path.write_text(value)
         mounts = ["259:3 / /unusual-alias", "259:4 / /unusual-alias",
                   "259:5 / /unusual-alias", "253:0 / /data"]
         if without_vendor:
@@ -168,9 +196,10 @@ command -p dd "$@"
             f.seek(512)
             f.write(b"BAD GPT!")
         corrupt = snapshot()
-        if checked:
+        if checked or live:
             result = run()
-            assert result.returncode != 0 and "Unknown/corrupt primary" in result.stdout, result.stdout + result.stderr
+            error = "generation/validation failed" if live else "Unknown/corrupt primary"
+            assert result.returncode != 0 and error in result.stdout, result.stdout + result.stderr
             assert snapshot() == corrupt, "Installer wrote over an unknown GPT"
         else:
             result = run()
@@ -180,16 +209,43 @@ command -p dd "$@"
             assert flashed[2] == before[2], "Installer wrote partition contents"
         with disk.open("r+b") as f:
             f.write(old_primary)
-            f.seek(15273567 * 512)
+            f.seek((SECTORS - 33) * 512)
             f.write(old_backup)
         assert snapshot() == before
+        if live:
+            with disk.open("r+b") as f:
+                f.seek((SECTORS - 1) * 512)
+                f.write(b"BAD GPT!")
+            corrupt = snapshot()
+            result = run()
+            assert result.returncode != 0 and "generation/validation failed" in result.stdout, result.stdout + result.stderr
+            assert snapshot() == corrupt
+            with disk.open("r+b") as f:
+                f.seek((SECTORS - 33) * 512)
+                f.write(old_backup)
         result = run({"FAIL_GPT_WRITE": "1"})
         assert result.returncode != 0 and "Backup GPT write failed" in result.stdout, result.stdout + result.stderr
         assert snapshot() == before, "Primary GPT changed after backup write failure"
         # A mounted affected partition is unmounted automatically, then the flash proceeds.
         (root / "mountinfo").write_text("1 0 259:4 / /cache rw - ext4 /dev/root rw\n")
+        saved_before = set(root.glob("before.*"))
         result = run()
         assert result.returncode == 0, result.stdout + result.stderr
+        if live:
+            assert "RAM ONLY" in result.stdout, result.stdout
+            saved, = set(root.glob("before.*")) - saved_before
+            assert (saved / "original-primary.bin").read_bytes() == old_primary
+            assert (saved / "original-backup.bin").read_bytes() == old_backup
+        operations = (root / "dd.log").read_text().splitlines()
+        writes = [i for i, line in enumerate(operations) if f"of={disk} " in line]
+        assert len(writes) == 2, operations
+        backup_write, primary_write = writes
+        assert f"seek={SECTORS - 33}" in operations[backup_write], operations
+        assert "seek=" not in operations[primary_write] or "seek=0" in operations[primary_write].split(), operations
+        assert any(f"if={disk} " in line and f"skip={SECTORS - 33}" in line
+                   for line in operations[backup_write + 1:primary_write]), operations
+        assert any(f"if={disk} " in line and "count=34" in line
+                   for line in operations[primary_write + 1:]), operations
         assert "Unmounting /cache" in result.stdout, result.stdout
         assert (root / "mountinfo").read_text() == "", "cache was not unmounted"
         after = snapshot()
@@ -199,7 +255,8 @@ command -p dd "$@"
         assert result.returncode == 0 and "already updated" in result.stdout
         assert snapshot() == after
     print("PASS: ZIP installer guards, backup-write failure, both-copy update, unchanged LK, idempotence"
-          + (" (hash-guard)" if checked else " (no hash guard)") + " (host simulation)")
+          + (" (live generation)" if live else " (hash-guard)" if checked else " (no hash guard)")
+          + f" (host simulation, {SECTORS} sectors)")
 
 
 def check_definition(directory, primary):
@@ -207,7 +264,7 @@ def check_definition(directory, primary):
     source = Path(__file__).with_name("make-gpt.sh").read_text()
     helpers = source[source.index("guid() {"):source.index("\n# A sparse")]
     rendered = subprocess.run(
-        ["sh", "-c", 'OUT=$1\n' + helpers + '\ndefinition\n',
+        ["sh", "-c", f'OUT=$1\nSECTORS={SECTORS}\n' + helpers + '\ndefinition\n',
          "generator-check", str(directory.resolve())],
         check=True, capture_output=True, text=True,
     ).stdout
@@ -228,10 +285,14 @@ def check_definition(directory, primary):
 
 
 def main():
+    global SECTORS
     directory = Path(sys.argv[1] if len(sys.argv) > 1 else "bin/gpt-openwrt-128")
+    SECTORS = struct.unpack_from("<Q", (directory / "gpt-primary.bin").read_bytes(), 544)[0] + 1
+    assert SECTORS in (15269888, 15273600), "Unsupported eMMC size"
     original, old_headers, old_table, old_parts = check_pair(directory, "original")
     primary, headers, table, parts = check_pair(directory, "gpt")
     assert hashlib.sha256(old_table).hexdigest() in {
+        "577d803386baf8ca66d4aa87ee74d0a79239fc95ced521d066b55406a0ec9c52",
         "25aea305a221daf2204d7ca7f0d1af571d4944b272c450cbe36a0e9d99a5d26a",
         "fd41582e245a85b5af06bf2880c144086ad7b0180daf743492ab1a1f08cc0acd",
         "d48e33830e03104aa1e7e5ffa56d04dce459df19b43881b60040a4125fa8f305",
@@ -244,7 +305,7 @@ def main():
     assert not without_vendor, "vendor must be retained"
     system_number = 11
     system_start = 409600
-    system_end = 15273566
+    system_end = SECTORS - 34
     expected = bytearray(len(old_table))
     preserved = system_number - 1
     expected[:preserved * 128] = old_table[:preserved * 128]

@@ -11,7 +11,8 @@ One layout:
 - `cache` is **removed**.
 - p1..p10, including `vendor`, keep their position, size and GUID.
 - a single `system` is p11, from LBA 409600 to the last usable LBA
-  (7257.796 MiB); it replaces the old `system` and `userdata`.
+  (7255.984 MiB on the 15269888-sector eMMC, 7257.796 MiB on the
+  15273600-sector eMMC); it replaces the old `system` and `userdata`.
   The name `system` is required by LK; do not rename it to `rootfs`.
 
 Entries are consecutive, no gaps. Labels and GUIDs are preserved; mounts
@@ -27,11 +28,53 @@ are looked up by name among the first 16 GPT entries, 128 bytes each from
 LBA 2; the installer also requires `tee1`. Dropping `recovery` would
 require adapting the boot flow, the MISC flags and the installers.
 
-## Generating the GPT (on the device)
+## Generate and install directly in TWRP
+
+`dist/sheldon-gpt-on-device.zip` contains a static ARM32 generator, not
+prebuilt GPT tables. It reads the actual eMMC geometry and both GPT copies,
+validates their headers, CRCs, matching entries and the original-13 or
+already-repartitioned-11 layout, then generates both new tables in RAM.
+Disk/partition GUIDs, MBR and p1..p10 are retained; `system` extends to the
+last usable sector of that particular eMMC. Supported capacities are
+15269888 and 15273600 sectors, with 512-byte sectors; other layouts or
+capacities fail closed. The installer uses the same mount checks,
+backup-first writes and readback verification as the prebuilt ZIP.
+
+Build on a host with Python 3, a native C compiler and a static ARM32 Linux
+cross-toolchain (for example `gcc-arm-linux-gnueabihf` plus its libc headers):
+
+```sh
+cd gpt
+./makedist.sh --on-device
+# Override ARMCC if the cross compiler has another name.
+```
+
+Install the ZIP from RAM/USB, never from a partition being removed:
+
+```sh
+adb push dist/sheldon-gpt-on-device.zip /tmp/
+adb shell twrp install /tmp/sheldon-gpt-on-device.zip
+```
+
+Before writing, the installer saves the old GPT copies in a printed
+`/tmp/gpt-before.XXXXXX` directory. **This backup is RAM-only**: use
+`adb pull /tmp/gpt-before.XXXXXX` to keep it on the host **before rebooting**.
+Keep a separate backup of any partition contents you need; GPT backups do
+not preserve filesystems. Then reboot recovery before using the new map.
+Nothing is formatted and LK/boot/preloader are not written by this updater.
+
+Checks (no devices): `python3 test_generate.py` and
+`python3 test_live.py dist/sheldon-gpt-on-device.zip`. The latter runs the
+real shell installer against sparse files for both capacities using a host
+build of the generator. The actual static ARM32 generator has also passed
+both geometries under QEMU. **The on-device-generation ZIP has not yet been
+flashed on hardware.** The capacity-specific ZIPs have been hardware-tested.
+
+## Generating a prebuilt GPT (on OpenWrt)
 
 `make-gpt.sh` runs on OpenWrt with `sfdisk` already installed. It is
-pinned to the GPT read from this stick and to its 15273600-sector /
-512-byte eMMC; it only accepts verified tables (pinned SHA256 allowlist)
+pinned to the GPT read from this stick and to the verified 15269888- or 15273600-sector /
+512-byte eMMCs; it only accepts verified tables (pinned SHA256 allowlist)
 and takes the GUIDs from the original dump. Binaries and installers are
 pinned to the GUID profile used to build them; after restoring another
 GPT, regenerate the files and review the hashes. It builds a GPT **from
@@ -50,7 +93,7 @@ All commands run from this `gpt/` directory. The files land in
 `bin/gpt-openwrt/`:
 
 - `gpt-primary.bin`: 34 sectors, from LBA 0 (includes the original MBR).
-- `gpt-backup.bin`: 33 sectors, from LBA 15273567.
+- `gpt-backup.bin`: 33 sectors, from LBA `sectors - 33`.
 - `original-primary.bin` and `original-backup.bin`: previous copies.
 - `layout.sfdisk`: description of the new table.
 
@@ -61,8 +104,10 @@ All commands run from this `gpt/` directory. The files land in
 zips and re-validates. By default the installer does NOT pin the device's
 current GPT to the original/new tables (it flashes from any table state);
 `--check-hash` restores that guard. Output:
-`dist/sheldon-gpt-openwrt-system-nocheck.zip` (default) or
-`dist/sheldon-gpt-openwrt-system.zip` (`--check-hash`).
+`dist/sheldon-gpt-openwrt-system-<sectors>-nocheck.zip` (default) or
+`dist/sheldon-gpt-openwrt-system-<sectors>.zip` (`--check-hash`). The size is
+pinned into the prebuilt installer; never flash one capacity's ZIP on the
+other.
 It installs no LK, preloader or partition images; it does not run the full
 kamakiri installer. It checks device, geometry and payload hashes, and reads both current
 GPT copies (their hashes are enforced only with `--check-hash`); it writes the backup first, verifies the readback, then
@@ -83,7 +128,8 @@ Reproducible host-side check, including a simulation of the installer over
 a sparse file (no real devices):
 
 ```sh
-python3 test_gpt.py bin/gpt-openwrt dist/sheldon-gpt-openwrt-system.zip
+python3 test_gpt.py bin/gpt-openwrt dist/sheldon-gpt-openwrt-system-15269888.zip
+# Use 15273600 instead for a dump from the larger eMMC.
 ```
 
 ## Manual flashing with `dd`
@@ -111,7 +157,9 @@ command -v toybox >/dev/null # Needed for 64-bit offsets in TWRP.
 [ -b "$DEV" ]
 read -r sectors < /sys/class/block/mmcblk0/size
 read -r sector_size < /sys/class/block/mmcblk0/queue/logical_block_size
-[ "$sectors" = 15273600 ] && [ "$sector_size" = 512 ] || exit 1
+EXPECTED_SECTORS=15269888 # Must match the verified dump; 15273600 on the larger eMMC.
+[ "$sectors" = "$EXPECTED_SECTORS" ] && [ "$sector_size" = 512 ] || exit 1
+BACKUP_LBA=$((sectors - 33))
 for part in 11 12 13; do
     node=/sys/class/block/mmcblk0p$part/dev
     if [ ! -f "$node" ]; then
@@ -124,14 +172,14 @@ for part in 11 12 13; do
 done
 
 toybox dd if="$DEV" of=before-primary.bin bs=512 count=34
-toybox dd if="$DEV" of=before-backup.bin bs=512 skip=15273567 count=33
+toybox dd if="$DEV" of=before-backup.bin bs=512 skip="$BACKUP_LBA" count=33
 cmp original-primary.bin before-primary.bin
 cmp original-backup.bin before-backup.bin
 
 # Backup first; do not touch the primary if its write or verification fails.
-toybox dd if=gpt-backup.bin of="$DEV" bs=512 seek=15273567 count=33 conv=notrunc
+toybox dd if=gpt-backup.bin of="$DEV" bs=512 seek="$BACKUP_LBA" count=33 conv=notrunc
 sync
-toybox dd if="$DEV" of=check-backup.bin bs=512 skip=15273567 count=33
+toybox dd if="$DEV" of=check-backup.bin bs=512 skip="$BACKUP_LBA" count=33
 cmp gpt-backup.bin check-backup.bin
 
 toybox dd if=gpt-primary.bin of="$DEV" bs=512 count=34 conv=notrunc
@@ -158,7 +206,8 @@ backup. Binary dumps are generated locally and included in generated ZIPs,
 not committed; the local `.bin` dumps used for our hardware test were
 subsequently deleted. The text alone is not input for `makedist.sh`.
 
-There is **no automated restore mode or tested rollback ZIP**. Restoring
+There is **no automated restore mode or tested rollback ZIP**. The runtime
+generator likewise only repartitions; it does not implement rollback. Restoring
 requires separately prepared and validated original GPT copies. Use TWRP
 or an initramfs with affected partitions unmounted, verify geometry and the
 current layout, write and verify backup first and primary second, then
@@ -177,7 +226,8 @@ for any rebuild or rollback.
 
 ## Relation to the ARM64 payload
 
-The GPT zip is independent: `dist/sheldon-gpt-openwrt-system.zip` (TWRP). If
+The GPT zip is independent: `dist/sheldon-gpt-openwrt-system-<sectors>.zip` (TWRP), or the
+geometry-aware `dist/sheldon-gpt-on-device.zip`. If
 you use both, update the payload first, then the GPT, and **reboot recovery
 before writing the system**.
 
