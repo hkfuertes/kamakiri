@@ -67,8 +67,12 @@ Checks (no devices): `python3 test_generate.py` and
 `python3 test_live.py dist/sheldon-gpt-on-device.zip`. The latter runs the
 real shell installer against sparse files for both capacities using a host
 build of the generator. The actual static ARM32 generator has also passed
-both geometries under QEMU. **The on-device-generation ZIP has not yet been
-flashed on hardware.** The capacity-specific ZIPs have been hardware-tested.
+both geometries under QEMU. The on-device-generation ZIP was hardware-tested
+on Sheldon `G071CQ1560161WEV` (15273600 sectors): TWRP updater RC=0, exported
+original backups matched the host backups, both written GPT copies matched
+the independently generated expected pair, and recovery rebooted with the
+new p11 map. The 15269888-sector runtime path remains host/QEMU-tested only;
+its capacity-specific ZIP has been hardware-tested.
 
 ## Generating a prebuilt GPT (on OpenWrt)
 

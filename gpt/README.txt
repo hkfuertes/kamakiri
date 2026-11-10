@@ -17,7 +17,9 @@ original-13 or generated-11 partition layout, then generates a native-size
 GPT in TWRP. Supports per-device GUIDs, rejects other layouts/capacities.
 Original GPT copies are saved to the printed /tmp/gpt-before.XXXXXX path.
 RAM ONLY: adb pull that directory BEFORE rebooting to retain the backup.
-Host simulation and ARM32/QEMU tested; runtime ZIP not yet hardware-tested.
+Host simulation and ARM32/QEMU tested for both capacities. Runtime ZIP
+hardware-tested on 15273600-sector Sheldon: RC=0, exact GPT readback and
+recovery reboot. Small-capacity runtime path not yet hardware-tested.
 
 Install through TWRP from /tmp or USB, not system/data/cache. Keep backups
 of partition contents: restoring GPT alone does NOT restore data. Reboot
